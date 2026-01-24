@@ -2,7 +2,7 @@
   "name": "projects-plugin",
   "displayName": "Projects Plugin",
   "description": "Project management sidebar with Skills and Chats integration",
-  "version": "0.0.1",
+  "version": "0.0.11",
   "publisher": "antigravity",
   "engines": {
     "vscode": "^1.80.0"
@@ -10,6 +10,11 @@
   "categories": [
     "Other"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/placeholder/projects-plugin.git"
+  },
+  "license": "MIT",
   "activationEvents": [
     "onView:antigravity.projectsView"
   ],

@@ -19,6 +19,20 @@ export function activate(context: vscode.ExtensionContext) {
             provider.refresh();
         })
     );
+
+    // Check for pending conversation to open (after window reload/project switch)
+    const pendingChat = context.globalState.get<{ id: string, timestamp: number }>('pendingOpenConversation');
+    if (pendingChat) {
+        // Clear immediately
+        context.globalState.update('pendingOpenConversation', undefined);
+
+        // Only open if recent (e.g. within 5 mins)
+        if (Date.now() - pendingChat.timestamp < 5 * 60 * 1000) {
+            setTimeout(() => {
+                vscode.commands.executeCommand('antigravity.setVisibleConversation', pendingChat.id);
+            }, 1500); // Small delay to ensure UI is ready
+        }
+    }
 }
 
 export function deactivate() { }

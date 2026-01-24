@@ -8,11 +8,11 @@
 
     /* Traditional Japanese Colors */
     --color-safe: #006E54;
-    /* Moegi (Green) */
+    /* Moegi */
     --color-warning: #F8B500;
-    /* Yamabuki (Orange/Yellow) */
+    /* Yamabuki */
     --color-danger: #CB4042;
-    /* Akabeni (Red) */
+    /* Akabeni */
 }
 
 * {
@@ -24,8 +24,11 @@ body {
     margin: 0;
     font-family: var(--vscode-font-family);
     font-size: var(--vscode-font-size);
-    color: var(--foreground);
-    background-color: var(--background);
+    color: var(--vscode-foreground);
+    background-color: var(--vscode-sideBar-background);
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
 }
 
 #app {
@@ -47,16 +50,61 @@ body {
     font-size: 12px;
 }
 
-/* Project Item */
 .project-item {
-    margin-bottom: 16px;
+    margin-bottom: 8px;
+    border-left: 3px solid transparent;
+}
+
+/* Active Project Style */
+.project-item.active {
+    background-color: var(--vscode-list-activeSelectionBackground);
+}
+
+.project-content {
+    display: block;
+}
+
+.project-content.collapsed {
+    display: none;
+}
+
+/*
+ * CRITICAL FIX: Active Dot Size
+ * Use min-width and flex-shrink to prevent collapsing/obstruction
+ */
+.project-item.active .dot.green {
+    /* Revert to standard size (inherited from .dot) but keep a subtle glow */
+    box-shadow: 0 0 4px rgba(0, 110, 84, 0.4);
 }
 
 .project-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 4px 0;
+    padding: 8px 12px;
+    /* Increased hit area & padding */
+    cursor: pointer;
+    border-radius: 4px;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow: visible;
+    /* Allow dot glow/shadow to spill */
+}
+
+/* Normal dot style */
+.project-header .dot {
+    margin-right: 10px;
+    flex-shrink: 0;
+    /* CRITICAL */
+    transition: all 0.2s;
+}
+
+.file-item {
+    cursor: pointer;
+}
+
+.file-item:hover {
+    color: var(--vscode-foreground) !important;
+    text-decoration: underline;
 }
 
 .project-name {
@@ -87,6 +135,7 @@ body {
     font-weight: bold;
     border-radius: 4px;
     transition: opacity 0.15s, color 0.15s;
+    margin-left: 8px;
 }
 
 .project-header:hover .delete-btn {
@@ -98,7 +147,44 @@ body {
     background-color: rgba(203, 64, 66, 0.1);
 }
 
-/* Conversations List */
+/* Custom Context Menu - CRITICAL FIX */
+.ctx-menu {
+    display: none;
+    position: fixed;
+    z-index: 99999;
+    width: auto;
+    min-width: 240px;
+    /* Wide enough */
+    background-color: var(--vscode-menu-background);
+    color: var(--vscode-menu-foreground);
+    border: 1px solid var(--vscode-menu-border);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    border-radius: 6px;
+    padding: 4px 0;
+    white-space: nowrap !important;
+    /* FORCE SINGLE LINE */
+    overflow: hidden;
+}
+
+.ctx-menu.visible {
+    display: block;
+}
+
+.ctx-item {
+    padding: 8px 16px;
+    /* Taller touch target */
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+}
+
+.ctx-item:hover {
+    background-color: var(--vscode-menu-selectionBackground);
+    color: var(--vscode-menu-selectionForeground);
+}
+
+/* Other UI Elements */
 .conversations-list {
     margin-top: 4px;
     padding-left: 8px;
@@ -138,38 +224,109 @@ body {
     flex-shrink: 0;
 }
 
-.conversation-more {
+/* Dots */
+.dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.dot.green {
+    background-color: var(--color-safe);
+    margin-right: 8px;
+}
+
+.dot.red {
+    background-color: var(--color-danger);
+    margin-right: 6px;
+    width: 6px;
+    height: 6px;
+}
+
+.dot.blue {
+    background-color: #2EA9DF;
+    margin-right: 6px;
+    width: 6px;
+    height: 6px;
+}
+
+/* Folders */
+.folder-container {
+    margin-left: 4px;
+    margin-top: 4px;
+    padding-left: 8px;
+    border-left: 1px solid var(--border-color);
+}
+
+.folder-header {
+    display: flex;
+    align-items: center;
+    padding: 4px 6px;
+    cursor: pointer;
     font-size: 11px;
     color: var(--muted-text);
-    padding: 4px 8px;
-    cursor: pointer;
+    font-weight: 600;
 }
 
-.conversation-more:hover {
+.folder-header:hover {
     color: var(--foreground);
+    background-color: var(--hover-background);
+    border-radius: 4px;
 }
 
-/* Footer */
+.folder-arrow {
+    font-size: 10px;
+    margin-right: 6px;
+    transition: transform 0.2s;
+    display: inline-block;
+}
+
+.folder-arrow.collapsed {
+    transform: rotate(-90deg);
+}
+
+.folder-content {
+    display: block;
+    margin-left: 12px;
+}
+
+.folder-content.collapsed {
+    display: none;
+}
+
+.folder-empty {
+    font-size: 10px;
+    color: var(--muted-text);
+    padding: 4px 8px;
+    opacity: 0.7;
+}
+
+/*
+ * FOLDER ICON FIX
+ * Strictly constrain folder icon size
+ */
+.folder-icon {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    margin-right: 6px;
+    display: block;
+    object-fit: contain;
+}
+
+/* Usage Display (Footer) */
 .footer {
     padding: 12px;
     border-top: 1px solid var(--border-color);
     background-color: var(--header-bg);
 }
 
-/* Usage Display */
-.usage-display {
-    width: 100%;
-}
-
-/* Groups Overview */
 .usage-groups {
     display: flex;
     flex-direction: column;
     gap: 10px;
-}
-
-.usage-group-item {
-    padding: 6px 0;
 }
 
 .group-header {
@@ -215,7 +372,6 @@ body {
     transition: width 0.3s;
 }
 
-/* Expand Toggle */
 .usage-header-row {
     display: flex;
     justify-content: space-between;
@@ -224,11 +380,6 @@ body {
     padding-top: 8px;
     border-top: 1px solid var(--border-color);
     cursor: pointer;
-}
-
-.toggle-label {
-    font-size: 10px;
-    color: var(--muted-text);
 }
 
 .toggle-icon {
@@ -241,7 +392,6 @@ body {
     transform: rotate(180deg);
 }
 
-/* Expandable Details */
 .usage-list {
     margin-top: 8px;
     display: none;
@@ -253,40 +403,6 @@ body {
     display: block;
 }
 
-.detail-group-header {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--muted-text);
-    margin-top: 8px;
-    margin-bottom: 4px;
-    text-transform: uppercase;
-}
-
-.usage-item-row {
-    margin-bottom: 8px;
-    padding: 4px;
-    border-radius: 4px;
-}
-
-.usage-item-row:hover {
-    background-color: var(--hover-background);
-}
-
-.usage-item-header {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 3px;
-    font-size: 11px;
-}
-
-.usage-item-bar {
-    height: 3px;
-    background-color: var(--vscode-scrollbarSlider-background);
-    border-radius: 2px;
-    overflow: hidden;
-}
-
-/* Selectable Group Rows */
 .usage-group-row {
     padding: 8px;
     margin-bottom: 4px;
@@ -304,96 +420,22 @@ body {
     border-color: var(--border-color);
 }
 
-.usage-group-row .group-bar-row {
-    margin-top: 4px;
-}
-
-/* --- UI Refinements: Dots & Folders --- */
-
-.dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-    flex-shrink: 0;
-}
-
-.dot.green {
-    background-color: var(--color-safe);
-    /* #006E54 */
-    margin-right: 8px;
-}
-
-.dot.red {
-    background-color: var(--color-danger);
-    /* #CB4042 */
-    margin-right: 6px;
-    width: 6px;
-    height: 6px;
-}
-
-.dot.blue {
-    background-color: #2EA9DF;
-    /* Tsuyukusa-iro (Dayflower Blue) */
-    margin-right: 6px;
-    width: 6px;
-    height: 6px;
-}
-
-.folder-container {
-    margin-left: 4px;
-    margin-top: 4px;
-    padding-left: 8px;
-    border-left: 1px solid var(--border-color);
-}
-
-.folder-header {
-    display: flex;
-    align-items: center;
-    padding: 4px 6px;
-    cursor: pointer;
-    font-size: 11px;
-    color: var(--muted-text);
-    font-weight: 600;
-    user-select: none;
-}
-
-.folder-header:hover {
-    color: var(--foreground);
-    background-color: var(--hover-background);
+.usage-item-row {
+    margin-bottom: 8px;
+    padding: 4px;
     border-radius: 4px;
 }
 
-.folder-arrow {
-    font-size: 10px;
-    margin-right: 6px;
-    transition: transform 0.2s;
-    display: inline-block;
-}
-
-.folder-arrow.collapsed {
-    transform: rotate(-90deg);
-}
-
-.folder-content {
-    display: block;
-    /* Default open */
-    margin-left: 12px;
-}
-
-.folder-content.collapsed {
-    display: none;
-}
-
-.folder-empty {
-    font-size: 10px;
-    color: var(--muted-text);
-    padding: 4px 8px;
-    opacity: 0.7;
-}
-
-/* Adjust project header for green dot */
-.project-header .project-name {
+.usage-item-header {
     display: flex;
-    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 3px;
+    font-size: 11px;
+}
+
+.usage-item-bar {
+    height: 3px;
+    background-color: var(--vscode-scrollbarSlider-background);
+    border-radius: 2px;
+    overflow: hidden;
 }

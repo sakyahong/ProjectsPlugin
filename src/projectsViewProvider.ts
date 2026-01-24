@@ -33,12 +33,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         this.conversationService = new ConversationService();
         this.skillService = new SkillService();
 
-        // Live Watcher for Skills
-        const skillsWatcher = vscode.workspace.createFileSystemWatcher('**/.agent/skills/**');
-        skillsWatcher.onDidCreate(() => this.refresh());
-        skillsWatcher.onDidChange(() => this.refresh());
-        skillsWatcher.onDidDelete(() => this.refresh());
-        context.subscriptions.push(skillsWatcher);
+        // Live Watcher for Skills is now handled by refreshWatchers() per project
 
         // Polling for Conversations (every 30s)
         this.conversationTimer = setInterval(() => {
@@ -49,6 +44,11 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 if (this.conversationTimer) clearInterval(this.conversationTimer);
             }
         });
+
+        // Listen for workspace changes to update active project
+        context.subscriptions.push(
+            vscode.workspace.onDidChangeWorkspaceFolders(() => this.refresh())
+        );
     }
 
     public resolveWebviewView(
@@ -67,45 +67,73 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.type) {
-                case 'openProject': {
-                    const uri = vscode.Uri.file(data.path);
-                    vscode.commands.executeCommand('vscode.openFolder', uri, false);
-                    this.projectStore.updateLastOpened(data.id);
+                case 'openProject':
+                    if (data.path) {
+                        const uri = vscode.Uri.file(data.path);
+                        const forceNewWindow = !!data.newWindow;
+                        vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: forceNewWindow });
+                        this.projectStore.updateLastOpened(data.id);
+                    }
                     break;
-                }
-                case 'deleteProject': {
-                    await this.projectStore.deleteProject(data.id);
-                    this.refresh();
+                case 'handleChatClick':
+                    if (data.cascadeId && data.projectPath) {
+                        this.handleChatRequest(data.cascadeId, data.projectPath);
+                    }
                     break;
-                }
-                case 'openSettings': {
+                case 'deleteProject':
+                    if (data.id) {
+                        await this.projectStore.deleteProject(data.id);
+                        this.refresh();
+                    }
                     break;
-                }
-                case 'onLoad': {
+                case 'openFile':
+                    if (data.path) {
+                        const uri = vscode.Uri.file(data.path);
+                        vscode.commands.executeCommand('vscode.open', uri);
+                    }
+                    break;
+                case 'refresh':
+                case 'onLoad':
                     this.refresh();
                     this.initQuotaFetching();
                     break;
-                }
-                case 'openConversation': {
-                    // Open the conversation in Antigravity chat panel
-                    try {
-                        await vscode.commands.executeCommand(
-                            'antigravity.setVisibleConversation',
-                            data.cascadeId
-                        );
-                    } catch (error) {
-                        console.error('Failed to open conversation:', error);
-                        vscode.window.showErrorMessage('Failed to open conversation');
-                    }
-                    break;
-                }
-                case 'fetchConversations': {
-                    // Fetch conversations for a specific project
-                    await this.fetchAndSendConversations(data.projectPath);
-                    break;
-                }
             }
         });
+    }
+
+    private async handleChatRequest(cascadeId: string, projectPath: string) {
+        // Normalize paths for comparison
+        const currentWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath.toLowerCase();
+        // Remove file:// prefix based on OS if needed, but usually fsPath has it removed.
+        // However, projectPath comes from storage which might have file://
+        const targetPath = projectPath.replace(/^file:\/\//, '').toLowerCase();
+
+        if (currentWorkspace === targetPath) {
+            // Same project, just open chat
+            vscode.commands.executeCommand('antigravity.setVisibleConversation', cascadeId);
+        } else {
+            // Different project, prompt user
+            const action = await vscode.window.showQuickPick(
+                ['Open Project in Current Window & Chat', 'Open Project in New Window & Chat'],
+                { placeHolder: 'This chat belongs to a different project.' }
+            );
+
+            if (!action) return;
+
+            const uri = vscode.Uri.file(targetPath);
+
+            if (action.includes('New Window')) {
+                vscode.commands.executeCommand('vscode.openFolder', uri, true);
+            } else {
+                // Switch Window (Reloads extension)
+                // Persist pending chat
+                await this.context.globalState.update('pendingOpenConversation', {
+                    id: cascadeId,
+                    timestamp: Date.now()
+                });
+                vscode.commands.executeCommand('vscode.openFolder', uri, false);
+            }
+        }
     }
 
     private async initQuotaFetching() {
@@ -116,15 +144,13 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 this.cachedPort = processInfo.connectPort;
                 this.cachedCsrfToken = processInfo.csrfToken;
 
-                // this.quotaService is already instantiated in constructor
-
                 this.fetchAndSendQuota();
 
                 // Poll every 5 seconds
                 if (this.quotaTimer) clearInterval(this.quotaTimer);
                 this.quotaTimer = setInterval(() => this.fetchAndSendQuota(), 5000);
             } else {
-                console.log('Antigravity language server process not found.');
+                // console.log('Antigravity language server process not found.');
             }
         } catch (error) {
             console.error('Failed to initialize quota fetching:', error);
@@ -164,13 +190,16 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 type: 'usageUpdate',
                 groups: uiGroups
             });
-        } catch (error) {
+        } catch (error: any) {
+            // Suppress initialization error as it's transient
+            if (error.message && error.message.includes('LanguageServerClient must be initialized first')) {
+                return;
+            }
             console.error('Failed to fetch quota:', error);
         }
     }
 
     private async fetchAndSendConversations(projectPath?: string) {
-
         // If port/token not available yet, try to detect
         if (!this.cachedPort || !this.cachedCsrfToken) {
             try {
@@ -233,35 +262,83 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             const projectPath = result[0].fsPath;
             const projectName = result[0].path.split('/').pop() || 'Untitled';
 
-            await this.projectStore.addProject(projectName, projectPath);
-            this.refresh();
+            // Check duplicate
+            const existing = this.projectStore.getProjects().find(p => p.path === projectPath);
+            if (existing) {
+                vscode.window.showWarningMessage(`Project '${projectName}' is already in the list.`);
+                return;
+            }
+
+            try {
+                await this.projectStore.addProject(projectName, projectPath);
+                await this.refresh();
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to add project: ${error}`);
+            }
         }
+    }
+
+    // Manage file watchers for all projects
+    private fileWatchers: vscode.FileSystemWatcher[] = [];
+
+    private refreshWatchers() {
+        // Dispose old watchers
+        this.fileWatchers.forEach(w => w.dispose());
+        this.fileWatchers = [];
+
+        const projects = this.projectStore.getProjects();
+        projects.forEach(project => {
+            // Watch .agent/skills recursively within each project path
+            // We use RelativePattern to support external folders
+            const watcher = vscode.workspace.createFileSystemWatcher(
+                new vscode.RelativePattern(project.path, '.agent/skills/**/*')
+            );
+
+            watcher.onDidCreate(() => this.refresh());
+            watcher.onDidChange(() => this.refresh());
+            watcher.onDidDelete(() => this.refresh());
+
+            this.fileWatchers.push(watcher);
+        });
     }
 
     public async refresh() {
         if (this._view) {
             const projects = this.projectStore.getProjects();
+
+            // Re-bind watchers whenever projects list changes or refresh is called
+            this.refreshWatchers();
+
             const projectSessions: { [key: string]: Session[] } = {};
             const projectSkills: { [key: string]: any[] } = {};
 
-            for (const project of projects) {
-                const sessions = await this.sessionParser.getSessionsForProject(project.path);
-                projectSessions[project.id] = sessions.slice(0, 3);
+            // Detect currently active project (workspace)
+            let activeProjectPath: string | null = null;
+            if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                activeProjectPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+            }
 
-                // Fetch Skills
-                const skills = await this.skillService.getSkillsForProject(project.path);
-                projectSkills[project.id] = skills;
+            for (const project of projects) {
+                try {
+                    const sessions = await this.sessionParser.getSessionsForProject(project.path);
+                    projectSessions[project.id] = sessions.slice(0, 3);
+
+                    // Fetch Skills
+                    const skills = await this.skillService.getSkillsForProject(project.path);
+                    projectSkills[project.id] = skills;
+                } catch (error) {
+                    console.error(`Failed to load data for project ${project.name}:`, error);
+                }
             }
 
             this._view.webview.postMessage({
                 type: 'update',
                 projects: projects,
                 sessions: projectSessions,
-                skills: projectSkills
+                skills: projectSkills,
+                activeProjectPath: activeProjectPath
             });
 
-            // Fetch conversations after projects are loaded
-            // Pass null to get all conversations (will be filtered client-side)
             this.fetchAndSendConversations();
         }
     }
@@ -269,6 +346,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     private _getHtmlForWebview(webview: vscode.Webview) {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'main.js'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'styles.css'));
+        const folderIconUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'folder-icon.png'));
         const nonce = getNonce();
 
         return `<!DOCTYPE html>
@@ -276,15 +354,16 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; img-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
                 <link href="${styleUri}" rel="stylesheet">
                 <title>Projects</title>
+                <script nonce="${nonce}">
+                    const folderIconUri = "${folderIconUri}";
+                </script>
             </head>
             <body>
                 <div id="app">
                     <div id="project-list"></div>
-
-
 
                     <div class="footer">
                         <div class="usage-display">
@@ -308,7 +387,6 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             </body>
             </html>`;
     }
-
 
     // Background process to fetch detailed steps and update workspace paths
     private async enrichConversationsWithWorkspace(conversations: Conversation[]) {

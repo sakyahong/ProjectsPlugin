@@ -106,9 +106,13 @@ export class QuotaService {
             for (const config of configs) {
                 const label = config.label || 'Unknown Model';
                 const quotaInfo = config.quotaInfo || {};
-                const remainingFraction = typeof quotaInfo.remainingFraction === 'number' ? quotaInfo.remainingFraction : 1.0;
-                const remainingPercent = Math.round(remainingFraction * 100);
                 const resetTime = quotaInfo.resetTime || '';
+
+                // Smart Default: If resetTime exists but fraction is missing, assume 0 (limited). Else 1.0 (unlimited).
+                let defaultFraction = resetTime ? 0.0 : 1.0;
+
+                const remainingFraction = typeof quotaInfo.remainingFraction === 'number' ? quotaInfo.remainingFraction : defaultFraction;
+                const remainingPercent = Math.round(remainingFraction * 100);
 
                 const modelInfo: QuotaInfo = {
                     modelName: label,
