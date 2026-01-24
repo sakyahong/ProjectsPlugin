@@ -1,0 +1,15 @@
+out
+node_modules
+.vscode-test
+*.vsix
+.DS_Store
+*.log
+dist
+.agent
+*.txt
+*.json
+!package.json
+!tsconfig.json
+!package-lock.json
+!src/**/*.json
+test-api.js
