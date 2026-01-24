@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { ProjectStore } from './projectStore';
 import { SessionParser } from './sessionParser';
 import { Project, Session, Conversation } from './types';
@@ -42,6 +44,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         context.subscriptions.push({
             dispose: () => {
                 if (this.conversationTimer) clearInterval(this.conversationTimer);
+                this.fileWatchers.forEach(w => w.dispose());
             }
         });
 
@@ -200,7 +203,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async fetchAndSendConversations(projectPath?: string) {
-        // If port/token not available yet, try to detect
+        // ... (detection logic)
         if (!this.cachedPort || !this.cachedCsrfToken) {
             try {
                 const processInfo = await this.portDetector.detect();
@@ -208,15 +211,15 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     this.cachedPort = processInfo.connectPort;
                     this.cachedCsrfToken = processInfo.csrfToken;
                 } else {
-                    return;
+                    return null; // Return null if not ready
                 }
             } catch (error) {
                 console.error('Failed to detect port:', error);
-                return;
+                return null;
             }
         }
 
-        if (!this._view) return;
+        if (!this._view) return null;
 
         try {
             const allConversations = await this.conversationService.fetchConversations(
@@ -224,29 +227,15 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 this.cachedCsrfToken
             );
 
-            // DEEP FETCH: Asynchronously fetch details for all conversations to find their workspace
-            // Do this in background without blocking initial render
+            // Fetch details in background (asynchronously)
             if (allConversations.length > 0) {
                 this.enrichConversationsWithWorkspace(allConversations);
             }
 
-            // If projectPath is provided, filter by workspace
-            // Otherwise send all conversations (don't filter since workspace association may not work)
-            const conversations = allConversations; // Send all for now, filter client-side
-
-            this._view.webview.postMessage({
-                type: 'conversationsUpdate',
-                projectPath: projectPath || null,
-                conversations: conversations.map(c => ({
-                    id: c.cascadeId,
-                    title: c.title,
-                    timeAgo: c.timeAgo,
-                    lastModifiedAt: c.lastModifiedAt,
-                    workspacePath: c.workspacePath
-                }))
-            });
+            return allConversations;
         } catch (error) {
             console.error('Failed to fetch conversations:', error);
+            return [];
         }
     }
 
@@ -282,65 +271,124 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     private fileWatchers: vscode.FileSystemWatcher[] = [];
 
     private refreshWatchers() {
+        const projects = this.projectStore.getProjects();
+        console.log(`[Watcher] Refreshing watchers for ${projects.length} projects`);
+
+        // Simple check to avoid redundant recreation if project paths haven't changed
+        // Use normalized paths for comparison to avoid case-sensitivity issues in some environments
+        const currentPaths = projects.map(p => this.normalizePath(p.path)).sort().join('|');
+        if ((this as any)._lastWatcherPaths === currentPaths) {
+            console.log('[Watcher] Projects unchanged, skipping recreation');
+            return;
+        }
+        (this as any)._lastWatcherPaths = currentPaths;
+
         // Dispose old watchers
         this.fileWatchers.forEach(w => w.dispose());
         this.fileWatchers = [];
 
-        const projects = this.projectStore.getProjects();
         projects.forEach(project => {
-            // Watch .agent/skills recursively within each project path
-            // We use RelativePattern to support external folders
-            const watcher = vscode.workspace.createFileSystemWatcher(
-                new vscode.RelativePattern(project.path, '.agent/skills/**/*')
-            );
+            const normPath = this.normalizePath(project.path);
+            console.log(`[Watcher] Creating multiple watchers for ${normPath}`);
 
-            watcher.onDidCreate(() => this.refresh());
-            watcher.onDidChange(() => this.refresh());
-            watcher.onDidDelete(() => this.refresh());
+            // Pattern 1: Any file change inside .agent/skills (recursive)
+            // Pattern 2: Changes to the .agent/skills directory itself (like adding new top-level skill folders)
+            // Pattern 3: Broader watcher for the .agent folder to be safe
+            // Use both casing just in case
+            const patterns = [
+                '.agent/skills/**/*',
+                '.agent/skills',
+                '.agent/Skills/**/*',
+                '.agent/Skills',
+                '.agent/**/*'
+            ];
 
-            this.fileWatchers.push(watcher);
+            const debouncedRefresh = this.debounce((reason: string) => {
+                console.log(`[Watcher] Triggering refresh for ${project.name}. Reason: ${reason}`);
+                this.refresh();
+            }, 500);
+
+            patterns.forEach(p => {
+                const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(normPath), p));
+                watcher.onDidCreate((uri) => {
+                    console.log(`[Watcher][${p}] File created: ${uri.fsPath}`);
+                    debouncedRefresh(`Create ${uri.fsPath}`);
+                });
+                watcher.onDidChange((uri) => {
+                    console.log(`[Watcher][${p}] File changed: ${uri.fsPath}`);
+                    debouncedRefresh(`Change ${uri.fsPath}`);
+                });
+                watcher.onDidDelete((uri) => {
+                    console.log(`[Watcher][${p}] File deleted: ${uri.fsPath}`);
+                    debouncedRefresh(`Delete ${uri.fsPath}`);
+                });
+                this.fileWatchers.push(watcher);
+            });
         });
     }
 
+    private debounce(func: Function, wait: number) {
+        let timeout: NodeJS.Timeout;
+        return (...args: any[]) => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func(...args), wait);
+        };
+    }
+
     public async refresh() {
+        console.log('[Refresh] refresh() called');
         if (this._view) {
             const projects = this.projectStore.getProjects();
-
-            // Re-bind watchers whenever projects list changes or refresh is called
             this.refreshWatchers();
 
             const projectSessions: { [key: string]: Session[] } = {};
             const projectSkills: { [key: string]: any[] } = {};
 
-            // Detect currently active project (workspace)
             let activeProjectPath: string | null = null;
             if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-                activeProjectPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                activeProjectPath = this.normalizePath(vscode.workspace.workspaceFolders[0].uri.fsPath);
             }
 
             for (const project of projects) {
                 try {
-                    const sessions = await this.sessionParser.getSessionsForProject(project.path);
+                    const normPath = this.normalizePath(project.path);
+                    const sessions = await this.sessionParser.getSessionsForProject(normPath);
                     projectSessions[project.id] = sessions.slice(0, 3);
-
-                    // Fetch Skills
-                    const skills = await this.skillService.getSkillsForProject(project.path);
-                    projectSkills[project.id] = skills;
+                    const skills = await this.skillService.getSkillsForProject(normPath);
+                    // Only update if skills were successfully fetched or the directory exists
+                    if (skills && (skills.length > 0 || fs.existsSync(path.join(normPath, '.agent/skills')) || fs.existsSync(path.join(normPath, '.agent/Skills')))) {
+                        projectSkills[project.id] = skills;
+                    }
                 } catch (error) {
                     console.error(`Failed to load data for project ${project.name}:`, error);
                 }
             }
 
+            // Also fetch conversations
+            const conversations = await this.fetchAndSendConversations();
+
+            console.log('[Refresh] Sending update to webview');
             this._view.webview.postMessage({
                 type: 'update',
                 projects: projects,
                 sessions: projectSessions,
-                skills: projectSkills,
-                activeProjectPath: activeProjectPath
+                skills: Object.keys(projectSkills).length > 0 ? projectSkills : undefined,
+                activeProjectPath: activeProjectPath,
+                conversations: conversations && conversations.length > 0 ? conversations.map(c => ({
+                    id: c.cascadeId,
+                    title: c.title,
+                    timeAgo: c.timeAgo,
+                    lastModifiedAt: c.lastModifiedAt,
+                    workspacePath: c.workspacePath
+                })) : undefined
             });
-
-            this.fetchAndSendConversations();
         }
+    }
+
+    private normalizePath(p: string): string {
+        // DO NOT use toLowerCase() here, as macOS and other OSes might have
+        // case-sensitive listeners or patterns even if the FS is case-insensitive.
+        return path.normalize(p).replace(/[\\/]$/, '');
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {

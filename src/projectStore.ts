@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { Project } from './types';
 
 export class ProjectStore {
@@ -10,16 +11,17 @@ export class ProjectStore {
         return this.context.globalState.get<Project[]>(ProjectStore.KEY, []);
     }
 
-    public async addProject(name: string, path: string, category: string = ''): Promise<void> {
+    public async addProject(name: string, p: string, category: string = ''): Promise<void> {
+        const normalizedPath = path.normalize(p).replace(/[\\/]$/, '');
         const projects = this.getProjects();
-        if (projects.some(p => p.path === path)) {
+        if (projects.some(proj => proj.path === normalizedPath)) {
             return;
         }
 
         const newProject: Project = {
             id: Date.now().toString(),
             name,
-            path,
+            path: normalizedPath,
             category,
             createdAt: Date.now(),
             lastOpenedAt: 0

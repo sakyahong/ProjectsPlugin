@@ -65,16 +65,46 @@
         const message = event.data;
         switch (message.type) {
             case 'update':
-                // console.log('UI Update received:', message.projects.length, 'projects');
-                projects = message.projects;
-                sessions = message.sessions;
+                console.log('[UI] Update received. Projects:', message.projects?.length);
+                let changed = false;
+
+                if (message.projects && message.projects.length > 0) {
+                    // Check if projects list actually changed to avoid layout thrashing
+                    const prevIds = projects.map(p => p.id).join(',');
+                    const nextIds = message.projects.map(p => p.id).join(',');
+                    if (prevIds !== nextIds || projects.length !== message.projects.length) {
+                        projects = message.projects;
+                        changed = true;
+                    } else {
+                        // Just update individual project data
+                        projects = message.projects;
+                    }
+                }
+
+                if (message.sessions) {
+                    Object.assign(sessions, message.sessions);
+                    changed = true;
+                }
+
                 if (message.skills) {
-                    skills = message.skills;
+                    Object.assign(skills, message.skills);
+                    changed = true;
                 }
-                if (message.activeProjectPath !== undefined) {
+
+                if (message.conversations && message.conversations.length > 0) {
+                    allConversations = message.conversations;
+                    changed = true;
+                }
+
+                if (message.activeProjectPath !== undefined && activeProjectPath !== message.activeProjectPath) {
                     activeProjectPath = message.activeProjectPath;
+                    changed = true;
                 }
-                renderProjects(); // Seamless re-render
+
+                // Always render if projects exist, but we could optimize further by checking 'changed'
+                if (projects.length > 0) {
+                    renderProjects();
+                }
                 break;
             case 'usageUpdate':
                 quotaGroups = message.groups || [];
@@ -85,9 +115,13 @@
                 renderUsage();
                 break;
             case 'conversationsUpdate':
-                allConversations = message.conversations || [];
-                renderConversations();
-                renderProjects(); // Also re-render projects to update grouped conversations
+                console.log('[UI] Conversations update received:', message.conversations?.length);
+                if (message.conversations && message.conversations.length > 0) {
+                    allConversations = message.conversations;
+                    if (projects.length > 0) {
+                        renderProjects();
+                    }
+                }
                 break;
         }
     });
@@ -274,15 +308,19 @@
         if (!projectListEl) return;
 
         if (projects.length === 0) {
+            console.log('[UI][renderProjects] projects count is 0, showing empty state');
             projectListEl.innerHTML = '<div class="empty-state">No projects yet.<br>Click + above to add one.</div>';
             return;
         }
 
-        // Remove empty state if present
+        console.log('[UI][renderProjects] Rendering', projects.length, 'projects');
+
+        // 0. Remove empty state if present
         const emptyState = projectListEl.querySelector('.empty-state');
         if (emptyState) emptyState.remove();
 
         const currentIds = new Set(projects.map(p => p.id));
+        console.log('[UI][renderProjects] Project IDs:', Array.from(currentIds));
 
         // 1. Remove projects that are no longer present
         Array.from(projectListEl.children).forEach(child => {
@@ -294,19 +332,23 @@
         });
 
         // 2. Update or Create projects
-        projects.forEach(project => {
+        projects.forEach((project, index) => {
             let projectEl = projectListEl.querySelector(`.project-item[data-container-id="${project.id}"]`);
 
             if (projectEl) {
                 updateProjectElement(projectEl, project);
             } else {
                 projectEl = createProjectElement(project);
-                projectListEl.appendChild(projectEl);
             }
 
-            // Re-order by appending (moves existing element to end)
-            // This ensures DOM order matches `projects` array order
-            projectListEl.appendChild(projectEl);
+            // Only move if not in correct position to avoid layout thrashing/flickering
+            if (projectListEl.children[index] !== projectEl) {
+                if (index >= projectListEl.children.length) {
+                    projectListEl.appendChild(projectEl);
+                } else {
+                    projectListEl.insertBefore(projectEl, projectListEl.children[index]);
+                }
+            }
         });
     }
 
@@ -330,7 +372,10 @@
         }
 
         // Update wrapper class
-        container.className = 'project-item' + (isActive ? ' active' : '');
+        const newClassName = 'project-item' + (isActive ? ' active' : '');
+        if (container.className !== newClassName) {
+            container.className = newClassName;
+        }
 
         // --- Header ---
         let headerEl = container.querySelector('.project-header');
@@ -431,9 +476,15 @@
         chatsContentDiv.className = 'folder-content' + (isChatsExpanded ? '' : ' collapsed');
 
         // Update Chats Content
-        // We re-render inner HTML here. Since we are inside the 'chatsContentDiv', flickering is minimized.
-        // Optimization: checking if conversations actually changed could be done, but simple re-render is usually fine for small lists.
-        renderChatsInner(chatsContentDiv, project, allConversations);
+        // Only update if expanded to avoid background work and flickering
+        if (isChatsExpanded) {
+            renderChatsInner(chatsContentDiv, project, allConversations);
+        } else {
+            // Keep it empty or minimal if collapsed
+            if (chatsContentDiv.innerHTML !== '') {
+                // optional: chatsContentDiv.innerHTML = '';
+            }
+        }
 
 
         // --- Skills Folder ---
@@ -463,6 +514,7 @@
         skillsContentDiv.className = 'folder-content' + (isSkillsExpanded ? '' : ' collapsed');
 
         // Update Skills Content
+        if (!isSkillsExpanded) return; // SKIP if not expanded
         const projectSkills = skills[project.id];
         // We re-render skills. renderSkills returns HTML string.
         // IMPORTANT: renderSkills logic relies on expandedFolders set, so it should render collapsed/expanded correctly
@@ -602,6 +654,9 @@
                         content.classList.remove('collapsed');
                         arrow.classList.remove('collapsed');
                         expandedFolders.add(targetId); // Track expansion
+
+                        // Trigger re-render to load data for newly expanded folder
+                        renderProjects();
                     } else {
                         content.classList.add('collapsed');
                         arrow.classList.add('collapsed');

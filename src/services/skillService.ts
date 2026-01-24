@@ -15,11 +15,15 @@ export class SkillService {
      * Each root folder contains the full file tree.
      */
     async getSkillsForProject(projectPath: string): Promise<SkillNode[]> {
-        const skillsDirName = '.agent/skills';
-        const fullPath = path.join(projectPath, skillsDirName);
+        let skillsDirName = '.agent/skills';
+        let fullPath = path.join(projectPath, skillsDirName);
 
         if (!fs.existsSync(fullPath)) {
-            return [];
+            skillsDirName = '.agent/Skills';
+            fullPath = path.join(projectPath, skillsDirName);
+            if (!fs.existsSync(fullPath)) {
+                return [];
+            }
         }
 
         try {
