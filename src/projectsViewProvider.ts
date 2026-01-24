@@ -485,20 +485,20 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
             await Promise.all(promises);
 
-            // Send update after each chunk if changes were found
-            if (updatedCount > 0 && this._view) {
-                // We send the FULL list with updates
-                this._view.webview.postMessage({
-                    type: 'conversationsUpdate',
-                    conversations: conversations.map(c => ({
-                        id: c.cascadeId,
-                        title: c.title,
-                        timeAgo: c.timeAgo,
-                        lastModifiedAt: c.lastModifiedAt,
-                        workspacePath: c.workspacePath
-                    }))
-                });
-            }
+        }
+
+        // Send a single final update after all chunks are processed
+        if (updatedCount > 0 && this._view) {
+            this._view.webview.postMessage({
+                type: 'conversationsUpdate',
+                conversations: conversations.map(c => ({
+                    id: c.cascadeId,
+                    title: c.title,
+                    timeAgo: c.timeAgo,
+                    lastModifiedAt: c.lastModifiedAt,
+                    workspacePath: c.workspacePath
+                }))
+            });
         }
     }
 }

@@ -82,18 +82,31 @@
                 }
 
                 if (message.sessions) {
-                    Object.assign(sessions, message.sessions);
-                    changed = true;
+                    const nextSessions = JSON.stringify(message.sessions);
+                    if (JSON.stringify(sessions) !== nextSessions) {
+                        Object.assign(sessions, message.sessions);
+                        changed = true;
+                        console.log('[UI] Sessions data changed');
+                    }
                 }
 
                 if (message.skills) {
-                    Object.assign(skills, message.skills);
-                    changed = true;
+                    const nextSkills = JSON.stringify(message.skills);
+                    if (JSON.stringify(skills) !== nextSkills) {
+                        Object.assign(skills, message.skills);
+                        changed = true;
+                        console.log('[UI] Skills data changed');
+                    }
                 }
 
                 if (message.conversations && message.conversations.length > 0) {
-                    allConversations = message.conversations;
-                    changed = true;
+                    const nextConvs = JSON.stringify(message.conversations.map(c => c.id + c.workspacePath));
+                    const prevConvs = JSON.stringify(allConversations.map(c => c.id + c.workspacePath));
+                    if (nextConvs !== prevConvs) {
+                        allConversations = message.conversations;
+                        changed = true;
+                        console.log('[UI] Conversations data changed');
+                    }
                 }
 
                 if (message.activeProjectPath !== undefined && activeProjectPath !== message.activeProjectPath) {
@@ -101,9 +114,13 @@
                     changed = true;
                 }
 
-                // Always render if projects exist, but we could optimize further by checking 'changed'
-                if (projects.length > 0) {
+                // Only render if something meaningful changed
+                if (projects.length > 0 && changed) {
+                    console.log('[UI] Rendering projects due to changes');
                     renderProjects();
+                } else if (projects.length > 0) {
+                    // Even if data didn't change, we might want to refresh UI components
+                    // but usually changed covers all data-driven shifts.
                 }
                 break;
             case 'usageUpdate':
@@ -514,30 +531,30 @@
         skillsContentDiv.className = 'folder-content' + (isSkillsExpanded ? '' : ' collapsed');
 
         // Update Skills Content
-        if (!isSkillsExpanded) return; // SKIP if not expanded
-        const projectSkills = skills[project.id];
-        // We re-render skills. renderSkills returns HTML string.
-        // IMPORTANT: renderSkills logic relies on expandedFolders set, so it should render collapsed/expanded correctly
-        // without needing post-render adjustments.
-        if (projectSkills && projectSkills.length > 0) {
-            const newSkillsHtml = renderSkills(projectSkills, project.id, 0);
-            if (skillsContentDiv.innerHTML !== newSkillsHtml) {
-                skillsContentDiv.innerHTML = newSkillsHtml;
-                // Re-bind click events for files
-                skillsContentDiv.querySelectorAll('.file-item').forEach(el => {
-                    el.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const filePath = el.getAttribute('data-path');
-                        if (filePath) {
-                            vscode.postMessage({ type: 'openFile', path: filePath });
-                        }
+        if (isSkillsExpanded) {
+            const projectSkills = skills[project.id];
+            // We re-render skills. renderSkills returns HTML string.
+            if (projectSkills && projectSkills.length > 0) {
+                const newSkillsHtml = renderSkills(projectSkills, project.id, 0);
+                if (skillsContentDiv.innerHTML !== newSkillsHtml) {
+                    console.log(`[UI] Updating Skills content for ${project.name}`);
+                    skillsContentDiv.innerHTML = newSkillsHtml;
+                    // Re-bind click events for files
+                    skillsContentDiv.querySelectorAll('.file-item').forEach(el => {
+                        el.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            const filePath = el.getAttribute('data-path');
+                            if (filePath) {
+                                vscode.postMessage({ type: 'openFile', path: filePath });
+                            }
+                        });
                     });
-                });
-            }
-        } else {
-            const emptyHtml = '<div class="folder-empty">No skills found</div>';
-            if (skillsContentDiv.innerHTML !== emptyHtml) {
-                skillsContentDiv.innerHTML = emptyHtml;
+                }
+            } else {
+                const emptyHtml = '<div class="folder-empty">No skills found</div>';
+                if (skillsContentDiv.innerHTML !== emptyHtml) {
+                    skillsContentDiv.innerHTML = emptyHtml;
+                }
             }
         }
     }

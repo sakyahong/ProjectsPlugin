@@ -2,7 +2,7 @@
   "name": "projects-plugin",
   "displayName": "Projects Plugin",
   "description": "Project management sidebar with Skills and Chats integration",
-  "version": "0.0.35",
+  "version": "0.0.36",
   "publisher": "antigravity",
   "engines": {
     "vscode": "^1.80.0"
