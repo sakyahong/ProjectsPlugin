@@ -23,6 +23,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     private cachedCsrfToken?: string;
 
     private conversationTimer?: NodeJS.Timeout;
+    private autoSyncTimer?: NodeJS.Timeout;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -41,9 +42,16 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         this.conversationTimer = setInterval(() => {
             this.fetchAndSendConversations();
         }, 30000);
+
+        // Auto-sync for projects (every 10s) to detect changes from other windows
+        this.autoSyncTimer = setInterval(() => {
+            this.checkAndRefreshIfProjectsChanged();
+        }, 10000);
+
         context.subscriptions.push({
             dispose: () => {
                 if (this.conversationTimer) clearInterval(this.conversationTimer);
+                if (this.autoSyncTimer) clearInterval(this.autoSyncTimer);
                 this.fileWatchers.forEach(w => w.dispose());
             }
         });
@@ -325,6 +333,16 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 this.fileWatchers.push(watcher);
             });
         });
+    }
+
+    private checkAndRefreshIfProjectsChanged() {
+        const projects = this.projectStore.getProjects();
+        const currentPaths = projects.map(p => this.normalizePath(p.path)).sort().join('|');
+        if ((this as any)._lastAutoSyncPaths !== currentPaths) {
+            console.log('[AutoSync] Projects changed in storage, refreshing...');
+            (this as any)._lastAutoSyncPaths = currentPaths;
+            this.refresh();
+        }
     }
 
     private debounce(func: Function, wait: number) {
