@@ -53,6 +53,8 @@ body {
 .project-item {
     margin-bottom: 8px;
     border-left: 3px solid transparent;
+    border-radius: 4px;
+    overflow: hidden;
 }
 
 /* Active Project Style */
