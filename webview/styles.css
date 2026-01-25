@@ -51,7 +51,7 @@ body {
 }
 
 .project-item {
-    margin-bottom: 8px;
+    margin-bottom: 4px;
     border-left: 3px solid transparent;
     border-radius: 4px;
     overflow: hidden;
@@ -82,7 +82,7 @@ body {
 .project-header {
     display: flex;
     align-items: center;
-    padding: 8px 12px;
+    padding: 6px 8px;
     /* Increased hit area & padding */
     cursor: pointer;
     border-radius: 4px;
@@ -150,22 +150,24 @@ body {
 }
 
 /* Custom Context Menu - CRITICAL FIX */
+/* Custom Context Menu - CRITICAL FIX */
 .ctx-menu {
     display: none;
     position: fixed;
     z-index: 99999;
-    width: auto;
-    min-width: 240px;
-    /* Wide enough */
+    width: max-content;
+    /* Fit content exactly */
+    min-width: 140px;
+    /* Smaller min-width */
+    max-width: 300px;
     background-color: var(--vscode-menu-background);
     color: var(--vscode-menu-foreground);
     border: 1px solid var(--vscode-menu-border);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     border-radius: 6px;
     padding: 4px 0;
-    white-space: nowrap !important;
-    /* FORCE SINGLE LINE */
     overflow: hidden;
+    font-family: inherit;
 }
 
 .ctx-menu.visible {
@@ -173,17 +175,35 @@ body {
 }
 
 .ctx-item {
-    padding: 8px 16px;
-    /* Taller touch target */
+    padding: 6px 10px;
+    /* Slightly compact */
     font-size: 13px;
     cursor: pointer;
     display: flex;
     align-items: center;
+    gap: 8px;
+    line-height: normal;
+    white-space: nowrap;
+    /* Prevent wrapping */
 }
 
 .ctx-item:hover {
     background-color: var(--vscode-menu-selectionBackground);
     color: var(--vscode-menu-selectionForeground);
+}
+
+.ctx-icon {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    fill: none;
+    opacity: 0.85;
+}
+
+.ctx-item:hover .ctx-icon {
+    opacity: 1;
 }
 
 /* Other UI Elements */

@@ -292,12 +292,27 @@
     const ctxMenuEl = document.createElement('div');
     ctxMenuEl.className = 'ctx-menu';
     ctxMenuEl.innerHTML = `
-        <div class="ctx-item" id="ctx-open-current">Open in Current Window</div>
-        <div class="ctx-item" id="ctx-open-new">Open in New Window</div>
+        <div class="ctx-item" id="ctx-open-current">
+            <svg class="ctx-icon" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            Open in Current Window
+        </div>
+        <div class="ctx-item" id="ctx-open-new">
+            <svg class="ctx-icon" viewBox="0 0 24 24"><path d="M21 3h-6m6 0v6m0-6L14 10"></path><rect x="3" y="11" width="18" height="10" rx="2"></rect></svg>
+            Open in New Window
+        </div>
         <div class="ctx-item" id="ctx-separator" style="height:1px; background:var(--border-color); margin:4px 0; display:none;"></div>
-        <div class="ctx-item" id="ctx-apply-skill" style="display:none;">Apply Skill</div>
-        <div class="ctx-item" id="ctx-delete-skill" style="display:none; color:var(--color-danger);">Delete Skill</div>
-        <div class="ctx-item" id="ctx-reveal">Reveal in Finder</div>
+        <div class="ctx-item" id="ctx-apply-skill" style="display:none;">
+            <svg class="ctx-icon" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"></path><path d="M12 19h8"></path></svg>
+            Apply Skill
+        </div>
+        <div class="ctx-item" id="ctx-delete-skill" style="display:none; color:var(--color-danger);">
+            <svg class="ctx-icon" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            Delete Skill
+        </div>
+        <div class="ctx-item" id="ctx-reveal">
+            <svg class="ctx-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            Reveal in Finder
+        </div>
     `;
     document.body.appendChild(ctxMenuEl);
 
@@ -375,8 +390,8 @@
                 const itemDelete = document.getElementById('ctx-delete-skill');
 
                 if (isNormalProject) {
-                    itemOpenCurrent.style.display = 'block';
-                    itemOpenNew.style.display = 'block';
+                    itemOpenCurrent.style.display = 'flex';
+                    itemOpenNew.style.display = 'flex';
                     itemSeparator.style.display = 'none';
                     itemApply.style.display = 'none';
                     itemDelete.style.display = 'none';
@@ -386,9 +401,9 @@
                     itemOpenNew.style.display = 'none';
 
                     if (isSkillRoot) {
-                        itemSeparator.style.display = 'block';
-                        itemApply.style.display = 'block';
-                        itemDelete.style.display = 'block';
+                        itemSeparator.style.display = 'none'; // No separator at top
+                        itemApply.style.display = 'flex';
+                        itemDelete.style.display = 'flex';
                     } else {
                         itemSeparator.style.display = 'none';
                         itemApply.style.display = 'none';
@@ -439,7 +454,7 @@
                 if (!globalEl) {
                     globalEl = document.createElement('div');
                     globalEl.className = 'project-item global-section';
-                    globalEl.style.marginBottom = '24px';
+                    globalEl.style.marginBottom = '8px'; // Reduced from 24px
                     projectListEl.prepend(globalEl);
                 }
 
@@ -457,7 +472,10 @@
                 const isExpanded = expandedProjects.has('global-skills');
 
                 // Removed arrow as requested
+                // Add invisible arrow for alignment - Strict Structure Matching
+                // Project headers use empty span for arrow (no text content), so we do the same.
                 header.innerHTML = `
+                    <span class="folder-arrow"></span>
                     <span class="dot red-global"></span>
                     <span class="project-name">Global Skills</span>
                 `;
@@ -474,7 +492,10 @@
 
                 const innerContent = document.createElement('div');
                 innerContent.className = 'skills-content';
-                innerContent.style.paddingLeft = '12px';
+                // mimic .folder-container styles exactly for alignment
+                innerContent.style.marginLeft = '4px';
+                innerContent.style.paddingLeft = '8px';
+                innerContent.style.borderLeft = '1px solid var(--border-color)';
 
                 const hasSkills = globalSkills.length > 0;
                 if (hasSkills) {
@@ -836,15 +857,13 @@
             if (node.type === 'directory') {
                 const uniqueId = getStableId(`skill-${projectId}`, node.path);
                 const isExpanded = expandedFolders.has(uniqueId);
-                // Top level folders (depth 0) get the Blue Dot and are marked as Skill Roots
-                const dotHtml = depth === 0 ? '<span class="dot blue"></span>' : '';
+                // Top level folders (depth 0) marked as Skill Roots
                 const isSkillAttr = depth === 0 ? 'data-is-skill="true"' : '';
 
                 html += `
                     <div class="skill-item">
-                        <div class="folder-header" data-target="${uniqueId}" data-path="${node.path}" ${isSkillAttr} style="padding-left: 0;">
+                        <div class="folder-header" data-target="${uniqueId}" data-path="${node.path}" ${isSkillAttr}>
                             <span class="folder-arrow ${isExpanded ? '' : 'collapsed'}">▼</span>
-                            ${dotHtml}
                             <span>${node.name}</span>
                         </div>
                         <div id="${uniqueId}" class="folder-content ${isExpanded ? '' : 'collapsed'}" style="margin-left: 12px; border-left: 1px solid var(--border-color);">
