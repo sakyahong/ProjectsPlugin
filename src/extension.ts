@@ -5,7 +5,11 @@ export function activate(context: vscode.ExtensionContext) {
     const provider = new ProjectsViewProvider(context.extensionUri, context);
 
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(ProjectsViewProvider.viewType, provider)
+        vscode.window.registerWebviewViewProvider(ProjectsViewProvider.viewType, provider, {
+            webviewOptions: {
+                retainContextWhenHidden: true
+            }
+        })
     );
 
     context.subscriptions.push(

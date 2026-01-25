@@ -24,6 +24,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
     private conversationTimer?: NodeJS.Timeout;
     private autoSyncTimer?: NodeJS.Timeout;
+    private conversationPathCache: Map<string, string> = new Map();
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -113,13 +114,14 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleChatRequest(cascadeId: string, projectPath: string) {
-        // Normalize paths for comparison
-        const currentWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath.toLowerCase();
-        // Remove file:// prefix based on OS if needed, but usually fsPath has it removed.
-        // However, projectPath comes from storage which might have file://
-        const targetPath = projectPath.replace(/^file:\/\//, '').toLowerCase();
+        // Use normalized but case-preserving path for system commands
+        const targetPath = projectPath.replace(/^file:\/\//, '');
 
-        if (currentWorkspace === targetPath) {
+        // Use lowercased version ONLY for comparison logic
+        const currentWorkspaceLower = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath.toLowerCase();
+        const targetPathLower = targetPath.toLowerCase();
+
+        if (currentWorkspaceLower === targetPathLower) {
             // Same project, just open chat
             vscode.commands.executeCommand('antigravity.setVisibleConversation', cascadeId);
         } else {
@@ -234,6 +236,14 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 this.cachedPort,
                 this.cachedCsrfToken
             );
+
+            // Re-apply cached paths immediately to avoid UI flicker/disappearance
+            allConversations.forEach(c => {
+                if (!c.workspacePath) {
+                    const cached = this.conversationPathCache.get(c.cascadeId);
+                    if (cached) c.workspacePath = cached;
+                }
+            });
 
             // Fetch details in background (asynchronously)
             if (allConversations.length > 0) {
@@ -479,6 +489,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 const workspacePath = this.conversationService.extractWorkspaceFromSteps(steps);
                 if (workspacePath) {
                     convo.workspacePath = workspacePath;
+                    this.conversationPathCache.set(convo.cascadeId, workspacePath);
                     updatedCount++;
                 }
             });

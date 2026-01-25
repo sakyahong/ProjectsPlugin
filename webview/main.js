@@ -100,8 +100,16 @@
                 }
 
                 if (message.conversations && message.conversations.length > 0) {
-                    const nextConvs = JSON.stringify(message.conversations.map(c => c.id + c.workspacePath));
-                    const prevConvs = JSON.stringify(allConversations.map(c => c.id + c.workspacePath));
+                    // Safety merge: Do not lose workspace paths we already know
+                    message.conversations.forEach(newC => {
+                        const oldC = allConversations.find(oc => oc.id === newC.id);
+                        if (oldC && oldC.workspacePath && !newC.workspacePath) {
+                            newC.workspacePath = oldC.workspacePath;
+                        }
+                    });
+
+                    const nextConvs = JSON.stringify(message.conversations.map(c => c.id + (c.workspacePath || '')));
+                    const prevConvs = JSON.stringify(allConversations.map(c => c.id + (c.workspacePath || '')));
                     if (nextConvs !== prevConvs) {
                         allConversations = message.conversations;
                         changed = true;
@@ -134,9 +142,20 @@
             case 'conversationsUpdate':
                 console.log('[UI] Conversations update received:', message.conversations?.length);
                 if (message.conversations && message.conversations.length > 0) {
-                    allConversations = message.conversations;
-                    if (projects.length > 0) {
-                        renderProjects();
+                    // Also apply safety merge here, though it's usually the enriched source
+                    message.conversations.forEach(newC => {
+                        const oldC = allConversations.find(oc => oc.id === newC.id);
+                        if (oldC && oldC.workspacePath && !newC.workspacePath) {
+                            newC.workspacePath = oldC.workspacePath;
+                        }
+                    });
+
+                    const nextConvs = JSON.stringify(message.conversations.map(c => c.id + (c.workspacePath || '')));
+                    const prevConvs = JSON.stringify(allConversations.map(c => c.id + (c.workspacePath || '')));
+                    if (nextConvs !== prevConvs) {
+                        allConversations = message.conversations;
+                        console.log('[UI] Conversations changed after enrichment, scheduling render');
+                        debouncedRenderProjects();
                     }
                 }
                 break;
@@ -320,6 +339,17 @@
     });
 
     // --- Render Functions ---
+
+    // Debounce renderProjects to batch multiple updates (especially during initialization)
+    function debounceRender(func, wait) {
+        let timeout;
+        return function (...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func(...args), wait);
+        };
+    }
+
+    const debouncedRenderProjects = debounceRender(renderProjects, 100);
 
     function renderProjects() {
         if (!projectListEl) return;
@@ -577,10 +607,19 @@
             return;
         }
 
-        // Naive re-render for chats (lists are usually small)
-        // To be perfect, we'd diff this too, but let's see if this is enough.
+        const limit = 10;
+        const currentConvos = projectConvos.slice(0, limit);
+
+        // Surgical update: use a hash that includes ID, Title, Time AND Path
+        // to detect when enrichment finishes or time updates.
+        const structureHash = currentConvos.map(c => `${c.id}-${c.title}-${c.timeAgo}-${c.workspacePath || ''}`).join('|');
+        if (container.getAttribute('data-structure-hash') === structureHash) {
+            return;
+        }
+        container.setAttribute('data-structure-hash', structureHash);
+
         let html = '';
-        projectConvos.slice(0, 10).forEach(convo => {
+        currentConvos.forEach(convo => {
             html += `
                 <div class="conversation-item sub-item" data-id="${convo.id}">
                     <div style="display:flex; align-items:center; overflow:hidden;">
@@ -592,22 +631,19 @@
             `;
         });
 
-        if (container.innerHTML !== html) { // Simple string diff check
-            container.innerHTML = html;
-            // Add listeners
-            container.querySelectorAll('.conversation-item').forEach(item => {
-                item.onclick = (e) => {
-                    e.stopPropagation();
-                    const cid = item.getAttribute('data-id'); // We didn't put id on div in string. Fixed now.
-                    // Wait, I need to put data-id on the div above.
-                    vscode.postMessage({
-                        type: 'handleChatClick',
-                        cascadeId: cid,
-                        projectPath: project.path
-                    });
-                };
-            });
-        }
+        container.innerHTML = html;
+        // Add listeners
+        container.querySelectorAll('.conversation-item').forEach(item => {
+            item.onclick = (e) => {
+                e.stopPropagation();
+                const cid = item.getAttribute('data-id');
+                vscode.postMessage({
+                    type: 'handleChatClick',
+                    cascadeId: cid,
+                    projectPath: project.path
+                });
+            };
+        });
     }
 
     function toggleProjectExpansion(projectId) {
