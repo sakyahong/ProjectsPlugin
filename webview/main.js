@@ -6,6 +6,8 @@
     let projects = [];
     let sessions = {};
     let skills = {};
+    let globalSkills = undefined;
+    let globalSkillsPath = null; // Store global path
     let activeProjectPath = null;
     let conversations = {};  // Map of projectPath -> conversations array
     let allConversations = [];  // All conversations (for global display)
@@ -65,7 +67,14 @@
         const message = event.data;
         switch (message.type) {
             case 'update':
-                console.log('[UI] Update received. Projects:', message.projects?.length);
+                console.log('[UI DEBUG] Message Received:', JSON.stringify({
+                    hasProjects: !!message.projects,
+                    projectsCount: message.projects?.length,
+                    hasGlobalSkills: message.globalSkills !== undefined,
+                    globalSkillsCount: message.globalSkills?.length,
+                    globalSkillsType: typeof message.globalSkills,
+                    isArray: Array.isArray(message.globalSkills)
+                }));
                 let changed = false;
 
                 if (message.projects && message.projects.length > 0) {
@@ -99,6 +108,13 @@
                     }
                 }
 
+                if (message.globalSkills !== undefined) {
+                    globalSkills = message.globalSkills;
+                    if (message.globalSkillsPath) globalSkillsPath = message.globalSkillsPath; // Capture path
+                    changed = true;
+                    console.log('[UI] Global Skills updated:', globalSkills.length);
+                }
+
                 if (message.conversations && message.conversations.length > 0) {
                     // Safety merge: Do not lose workspace paths we already know
                     message.conversations.forEach(newC => {
@@ -123,12 +139,9 @@
                 }
 
                 // Only render if something meaningful changed
-                if (projects.length > 0 && changed) {
-                    console.log('[UI] Rendering projects due to changes');
-                    renderProjects();
-                } else if (projects.length > 0) {
-                    // Even if data didn't change, we might want to refresh UI components
-                    // but usually changed covers all data-driven shifts.
+                if ((projects.length > 0 || globalSkills) && changed) {
+                    console.log('[UI] Scheduling renderProjects due to changes');
+                    debouncedRenderProjects();
                 }
                 break;
             case 'usageUpdate':
@@ -281,6 +294,7 @@
     ctxMenuEl.innerHTML = `
         <div class="ctx-item" id="ctx-open-current">Open in Current Window</div>
         <div class="ctx-item" id="ctx-open-new">Open in New Window</div>
+        <div class="ctx-item" id="ctx-reveal">Reveal in Finder</div>
     `;
     document.body.appendChild(ctxMenuEl);
 
@@ -298,6 +312,13 @@
         }
     });
 
+    document.getElementById('ctx-reveal').addEventListener('click', () => {
+        if (ctxMenuTarget) {
+            vscode.postMessage({ type: 'revealInOS', path: ctxMenuTarget.path });
+            hideCtxMenu();
+        }
+    });
+
     function hideCtxMenu() {
         ctxMenuEl.classList.remove('visible');
         ctxMenuTarget = null;
@@ -309,14 +330,37 @@
         e.preventDefault();
         e.stopPropagation();
 
-        const header = e.target.closest('.project-header');
+        // Helper to find valid target
+        const targetEl = e.target.closest('.project-header, .folder-header, .file-item');
 
-        if (header) {
-            const id = header.getAttribute('data-id');
-            const path = header.getAttribute('data-path');
+        if (targetEl) {
+            // Priority: data-path (files/folders), or project path from data-path
+            // Note: renderSkills adds data-path to file-item. We need to ensure folder-header has it too.
+            // Project header has data-path.
 
-            if (id && path) {
+            const path = targetEl.getAttribute('data-path') || targetEl.dataset.path;
+            const id = targetEl.getAttribute('data-id') || targetEl.dataset.target; // ID might technically be optional for pure file reveal
+
+            if (path) {
+                console.log('[UI] Context Menu on:', path);
                 ctxMenuTarget = { id, path };
+
+                // Determine type for menu items
+                const isGlobalHeader = targetEl.classList.contains('project-header') && targetEl.getAttribute('data-id') === 'global-skills';
+                const isNormalProject = targetEl.classList.contains('project-header') && !isGlobalHeader;
+
+                // Toggle visibility based on type
+                const itemOpenCurrent = document.getElementById('ctx-open-current');
+                const itemOpenNew = document.getElementById('ctx-open-new');
+
+                if (isNormalProject) {
+                    itemOpenCurrent.style.display = 'block';
+                    itemOpenNew.style.display = 'block';
+                } else {
+                    // Global Skills header, sub-folders, files -> Only Reveal
+                    itemOpenCurrent.style.display = 'none';
+                    itemOpenNew.style.display = 'none';
+                }
 
                 // Adjust position to stay in bounds
                 const x = Math.min(e.clientX, window.innerWidth - 180);
@@ -354,10 +398,89 @@
     function renderProjects() {
         if (!projectListEl) return;
 
+        try {
+            // 1. Render Global Skills Section
+            let globalEl = projectListEl.querySelector('.global-section');
+            if (globalSkills) {
+                if (!globalEl) {
+                    globalEl = document.createElement('div');
+                    globalEl.className = 'project-item global-section';
+                    globalEl.style.marginBottom = '24px';
+                    projectListEl.prepend(globalEl);
+                }
+
+                // Re-render header and content cleanly
+                globalEl.innerHTML = '';
+
+                const header = document.createElement('div');
+                header.className = 'project-header';
+                header.dataset.id = 'global-skills';
+                if (globalSkillsPath) header.dataset.path = globalSkillsPath; // Add path for context menu
+                header.style.cursor = 'pointer';
+                header.style.paddingBottom = '4px';
+
+                // Re-calculate expansion state
+                const isExpanded = expandedProjects.has('global-skills');
+
+                // Removed arrow as requested
+                header.innerHTML = `
+                    <span class="dot red-global"></span>
+                    <span class="project-name">Global Skills</span>
+                `;
+
+                // Attach safe listener
+                header.onclick = (e) => {
+                    e.stopPropagation();
+                    console.log('[UI] Toggling Global Skills');
+                    toggleProjectExpansion('global-skills');
+                };
+
+                const content = document.createElement('div');
+                content.className = `project-content ${isExpanded ? '' : 'collapsed'}`;
+
+                const innerContent = document.createElement('div');
+                innerContent.className = 'skills-content';
+                innerContent.style.paddingLeft = '12px';
+
+                const hasSkills = globalSkills.length > 0;
+                if (hasSkills) {
+                    innerContent.innerHTML = renderSkills(globalSkills, 'global', 0);
+                    // Attach click listeners for files
+                    innerContent.querySelectorAll('.file-item').forEach(el => {
+                        el.onclick = (e) => {
+                            e.stopPropagation();
+                            console.log('[UI] Opening Global Skill file:', el.dataset.path);
+                            // Use dataset.path as set in renderSkills
+                            vscode.postMessage({ type: 'openFile', path: el.dataset.path });
+                        };
+                    });
+                } else {
+                    innerContent.innerHTML = '<div class="folder-empty">No global skills found</div>';
+                }
+
+                content.appendChild(innerContent);
+                globalEl.appendChild(header);
+                globalEl.appendChild(content);
+
+            } else if (globalEl) {
+                globalEl.remove();
+            }
+        } catch (e) {
+            console.error('[UI] Error rendering Global Skills:', e);
+        }
+
+        const projectStartIndex = globalSkills ? 1 : 0;
+
+        // 2. Render Normal Projects
         if (projects.length === 0) {
-            console.log('[UI][renderProjects] projects count is 0, showing empty state');
-            projectListEl.innerHTML = '<div class="empty-state">No projects yet.<br>Click + above to add one.</div>';
-            return;
+            console.log('[UI][renderProjects] projects count is 0');
+            // Only show "No Projects" empty state if globalSkills hasn't been initialized yet
+            // If globalSkills is defined (even if empty []), we show the Global Skills header, so we don't show the full-page empty state.
+            if (globalSkills === undefined) {
+                projectListEl.innerHTML = '<div class="empty-state">No projects yet.<br>Click + above to add one.</div>';
+                return;
+            }
+            // If we have globalSkills (even empty), we CONTINUE rendering so the header appears.
         }
 
         console.log('[UI][renderProjects] Rendering', projects.length, 'projects');
@@ -370,7 +493,11 @@
         console.log('[UI][renderProjects] Project IDs:', Array.from(currentIds));
 
         // 1. Remove projects that are no longer present
+        // 1. Remove projects that are no longer present
         Array.from(projectListEl.children).forEach(child => {
+            // Ignore global section
+            if (child.classList.contains('global-section')) return;
+
             // If it's a project item (has data-container-id) and not in current list
             const id = child.getAttribute('data-container-id');
             if (id && !currentIds.has(id)) {
@@ -389,11 +516,12 @@
             }
 
             // Only move if not in correct position to avoid layout thrashing/flickering
-            if (projectListEl.children[index] !== projectEl) {
-                if (index >= projectListEl.children.length) {
+            const targetIndex = projectStartIndex + index;
+            if (projectListEl.children[targetIndex] !== projectEl) {
+                if (targetIndex >= projectListEl.children.length) {
                     projectListEl.appendChild(projectEl);
                 } else {
-                    projectListEl.insertBefore(projectEl, projectListEl.children[index]);
+                    projectListEl.insertBefore(projectEl, projectListEl.children[targetIndex]);
                 }
             }
         });
@@ -538,18 +666,27 @@
         const skillsContentId = `content-skills-${project.id}`;
         let skillsContainer = contentEl.querySelector(`.folder-container[data-type="skills"]`);
 
+        // Construct standard skills path
+        // We assume usage of forward slashes for internal path consistency or simple concatenation
+        // Since we are on Mac as per meta, this is safe.
+        const skillsPath = (project.path || '').replace(/\/$/, '') + '/.agent/skills';
+
         if (!skillsContainer) {
             skillsContainer = document.createElement('div');
             skillsContainer.className = 'folder-container';
             skillsContainer.setAttribute('data-type', 'skills');
             skillsContainer.innerHTML = `
-                <div class="folder-header" data-target="${skillsContentId}">
+                <div class="folder-header" data-target="${skillsContentId}" data-path="${skillsPath}">
                     <span class="folder-arrow">▼</span>
                     <span>Skills</span>
                 </div>
                 <div id="${skillsContentId}" class="folder-content"></div>
             `;
             contentEl.appendChild(skillsContainer);
+        } else {
+            // Update path if exists (in case project path weirdly changed or init timing)
+            const hdr = skillsContainer.querySelector('.folder-header');
+            if (hdr) hdr.setAttribute('data-path', skillsPath);
         }
 
         // Update Skills State
@@ -670,7 +807,7 @@
 
                 html += `
                     <div class="skill-item">
-                        <div class="folder-header" data-target="${uniqueId}" style="padding-left: 0;">
+                        <div class="folder-header" data-target="${uniqueId}" data-path="${node.path}" style="padding-left: 0;">
                             <span class="folder-arrow ${isExpanded ? '' : 'collapsed'}">▼</span>
                             ${dotHtml}
                             <span>${node.name}</span>

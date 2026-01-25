@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { ProjectStore } from './projectStore';
 import { SessionParser } from './sessionParser';
 import { Project, Session, Conversation } from './types';
@@ -96,6 +97,11 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     if (data.id) {
                         await this.projectStore.deleteProject(data.id);
                         this.refresh();
+                    }
+                    break;
+                case 'revealInOS':
+                    if (data.path) {
+                        vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(data.path));
                     }
                     break;
                 case 'openFile':
@@ -294,9 +300,10 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
         // Simple check to avoid redundant recreation if project paths haven't changed
         // Use normalized paths for comparison to avoid case-sensitivity issues in some environments
-        const currentPaths = projects.map(p => this.normalizePath(p.path)).sort().join('|');
+        const globalSkillsPath = path.join(os.homedir(), '.gemini/antigravity/global_skills');
+        const currentPaths = [globalSkillsPath, ...projects.map(p => this.normalizePath(p.path))].sort().join('|');
+
         if ((this as any)._lastWatcherPaths === currentPaths) {
-            console.log('[Watcher] Projects unchanged, skipping recreation');
             return;
         }
         (this as any)._lastWatcherPaths = currentPaths;
@@ -304,6 +311,17 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         // Dispose old watchers
         this.fileWatchers.forEach(w => w.dispose());
         this.fileWatchers = [];
+
+        // Global Skills Watcher
+        if (fs.existsSync(globalSkillsPath)) {
+            console.log(`[Watcher] Creating watcher for Global Skills: ${globalSkillsPath}`);
+            const debouncedGlobalRefresh = this.debounce(() => this.refresh(), 500);
+            const globalWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(globalSkillsPath, '**/*'));
+            globalWatcher.onDidCreate(() => debouncedGlobalRefresh());
+            globalWatcher.onDidChange(() => debouncedGlobalRefresh());
+            globalWatcher.onDidDelete(() => debouncedGlobalRefresh());
+            this.fileWatchers.push(globalWatcher);
+        }
 
         projects.forEach(project => {
             const normPath = this.normalizePath(project.path);
@@ -392,6 +410,32 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 }
             }
 
+            // Fetch Global Skills
+            const globalSkillsPath = path.join(os.homedir(), '.gemini/antigravity/global_skills');
+            console.log(`[GlobalSkills] Detecting in: ${globalSkillsPath}`);
+
+            // Ensure directory exists
+            if (!fs.existsSync(globalSkillsPath)) {
+                try {
+                    fs.mkdirSync(globalSkillsPath, { recursive: true });
+                    console.log(`[GlobalSkills] Created missing directory: ${globalSkillsPath}`);
+                } catch (err) {
+                    console.error(`[GlobalSkills] Failed to create directory: ${err}`);
+                }
+            }
+
+            let globalSkills: any[] = [];
+            try {
+                if (fs.existsSync(globalSkillsPath)) {
+                    globalSkills = await this.skillService.getSkillsFromPath(globalSkillsPath);
+                    console.log(`[GlobalSkills] Found ${globalSkills.length} skills`);
+                } else {
+                    console.log(`[GlobalSkills] Path does not exist: ${globalSkillsPath}`);
+                }
+            } catch (err) {
+                console.error(`[GlobalSkills] Error:`, err);
+            }
+
             // Also fetch conversations
             const conversations = await this.fetchAndSendConversations();
 
@@ -401,6 +445,14 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 projects: projects,
                 sessions: projectSessions,
                 skills: Object.keys(projectSkills).length > 0 ? projectSkills : undefined,
+                globalSkills: globalSkills, // ALWAYS send, even if empty, to help debugging
+                globalSkillsPath: globalSkillsPath, // Send path to frontend
+                debug: {
+                    homedir: os.homedir(),
+                    globalPath: globalSkillsPath,
+                    exists: fs.existsSync(globalSkillsPath),
+                    count: globalSkills.length
+                },
                 activeProjectPath: activeProjectPath,
                 conversations: conversations && conversations.length > 0 ? conversations.map(c => ({
                     id: c.cascadeId,

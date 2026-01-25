@@ -11,8 +11,6 @@ export interface SkillNode {
 export class SkillService {
     /*
      * Scans the project for .agent/skills and returns a structure of skills.
-     * The structure is a list of root folders (The "Skills").
-     * Each root folder contains the full file tree.
      */
     async getSkillsForProject(projectPath: string): Promise<SkillNode[]> {
         let skillsDirName = '.agent/skills';
@@ -26,29 +24,46 @@ export class SkillService {
             }
         }
 
+        return this.getSkillsFromPath(fullPath);
+    }
+
+    async getSkillsFromPath(fullPath: string): Promise<SkillNode[]> {
+        if (!fs.existsSync(fullPath)) {
+            return [];
+        }
+
         try {
-            // Get top level directories (The "Skills")
             const dirents = await fs.promises.readdir(fullPath, { withFileTypes: true });
-            const skillFolders = dirents.filter(d => d.isDirectory());
+            const nodes: SkillNode[] = [];
 
-            const skills: SkillNode[] = [];
-            for (const folder of skillFolders) {
-                const skillName = folder.name;
-                const skillPath = path.join(fullPath, skillName);
+            for (const dirent of dirents) {
+                if (dirent.name.startsWith('.')) continue;
 
-                const children = await this.scanDirectory(skillPath);
-
-                skills.push({
-                    name: skillName,
-                    type: 'directory',
-                    path: skillPath,
-                    children: children
-                });
+                const nodePath = path.join(fullPath, dirent.name);
+                if (dirent.isDirectory()) {
+                    nodes.push({
+                        name: dirent.name,
+                        type: 'directory',
+                        path: nodePath,
+                        children: await this.scanDirectory(nodePath)
+                    });
+                } else {
+                    nodes.push({
+                        name: dirent.name,
+                        type: 'file',
+                        path: nodePath
+                    });
+                }
             }
 
-            return skills;
+            nodes.sort((a, b) => {
+                if (a.type === b.type) return a.name.localeCompare(b.name);
+                return a.type === 'directory' ? -1 : 1;
+            });
+
+            return nodes;
         } catch (error) {
-            console.error(`Error scanning skills for ${projectPath}:`, error);
+            console.error(`Error scanning skills path ${fullPath}:`, error);
             return [];
         }
     }
@@ -59,7 +74,6 @@ export class SkillService {
             const nodes: SkillNode[] = [];
 
             for (const dirent of dirents) {
-                // Ignore hidden files
                 if (dirent.name.startsWith('.')) continue;
 
                 const fullPath = path.join(dirPath, dirent.name);
@@ -79,7 +93,6 @@ export class SkillService {
                 }
             }
 
-            // Sort: Directories first, then files
             nodes.sort((a, b) => {
                 if (a.type === b.type) return a.name.localeCompare(b.name);
                 return a.type === 'directory' ? -1 : 1;

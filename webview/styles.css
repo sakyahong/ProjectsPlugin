@@ -240,6 +240,13 @@ body {
     margin-right: 8px;
 }
 
+.dot.red-global {
+    background-color: #BC002D;
+    margin-right: 10px;
+    width: 8px;
+    height: 8px;
+}
+
 .dot.red {
     background-color: var(--color-danger);
     margin-right: 6px;
