@@ -110,6 +110,16 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                         vscode.commands.executeCommand('vscode.open', uri);
                     }
                     break;
+                case 'deleteSkill':
+                    if (data.path) {
+                        this.handleDeleteSkill(data.path);
+                    }
+                    break;
+                case 'applySkill':
+                    if (data.path) {
+                        this.handleApplySkill(data.path);
+                    }
+                    break;
                 case 'refresh':
                 case 'onLoad':
                     this.refresh();
@@ -148,10 +158,131 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 // Persist pending chat
                 await this.context.globalState.update('pendingOpenConversation', {
                     id: cascadeId,
-                    timestamp: Date.now()
                 });
                 vscode.commands.executeCommand('vscode.openFolder', uri, false);
             }
+        }
+    }
+
+    private async handleDeleteSkill(skillPath: string) {
+        const skillName = path.basename(skillPath);
+        const confirm = await vscode.window.showWarningMessage(
+            `Are you sure you want to delete the skill "${skillName}"?`,
+            { modal: true },
+            'Delete'
+        );
+
+        if (confirm === 'Delete') {
+            try {
+                // Compatible recursive delete
+                fs.rmSync(skillPath, { recursive: true, force: true });
+                // Refresh happens via watcher usually, but manual refresh is safer
+                this.refresh();
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Failed to delete skill: ${err.message}`);
+            }
+        }
+    }
+
+    private async handleApplySkill(sourcePath: string) {
+        const projects = this.projectStore.getProjects();
+        // Define Global Target
+        const globalPath = path.join(os.homedir(), '.gemini/antigravity/global_skills');
+
+        const targets: { label: string, description: string, targetPath: string }[] = [];
+
+        // Check if source is global
+        const isSourceGlobal = sourcePath.startsWith(globalPath);
+
+        // Add Global option if not source
+        if (!isSourceGlobal) {
+            targets.push({
+                label: 'Global Skills',
+                description: 'Apply to global scope',
+                targetPath: globalPath
+            });
+        }
+
+        // Add Project options
+        projects.forEach(p => {
+            const projectSkillsPath = path.join(p.path, '.agent/skills');
+            // Check if source is NOT inside this project
+            // Simple string check is usually sufficient for standard paths
+            if (!this.isSubPath(projectSkillsPath, sourcePath)) {
+                targets.push({
+                    label: p.name,
+                    description: p.path,
+                    targetPath: projectSkillsPath
+                });
+            }
+        });
+
+        if (targets.length === 0) {
+            vscode.window.showInformationMessage('No other targets available to apply this skill.');
+            return;
+        }
+
+        const selection = await vscode.window.showQuickPick(targets, {
+            placeHolder: `Select target to apply "${path.basename(sourcePath)}"`
+        });
+
+        if (selection) {
+            const destPath = path.join(selection.targetPath, path.basename(sourcePath));
+
+            // Check existence
+            if (fs.existsSync(destPath)) {
+                const overwrite = await vscode.window.showWarningMessage(
+                    `Skill "${path.basename(sourcePath)}" already exists in ${selection.label}. Overwrite?`,
+                    'Yes', 'No'
+                );
+                if (overwrite !== 'Yes') return;
+            }
+
+            try {
+                // Make sure parent exists
+                if (!fs.existsSync(selection.targetPath)) {
+                    fs.mkdirSync(selection.targetPath, { recursive: true });
+                }
+
+                // Copy
+                // Use fs.cpSync if available (Node 16.7+), fallback to recursive copy helper if needed.
+                // VS Code 1.80 uses Node 18, so cpSync is fine.
+                // BUT we need to cast fs as any to avoid TS errors if types are old,
+                // or just use a helper to be safe. Since I can't check types easily, I'll assume cpSync exists but wrap in try/catch or use a manual fallback if it fails?
+                // Actually, let's write a simple recursive copy function to be 100% safe against TS/Node version mismatches in build env.
+                this.copyFolderRecursiveSync(sourcePath, destPath);
+
+                vscode.window.showInformationMessage(`Successfully applied skill to ${selection.label}`);
+                // Refresh explicitly
+                setTimeout(() => this.refresh(), 500); // Wait a bit for file events
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Failed to apply skill: ${err.message}`);
+                console.error(err);
+            }
+        }
+    }
+
+    private isSubPath(parent: string, child: string) {
+        const relative = path.relative(parent, child);
+        return !relative.startsWith('..') && !path.isAbsolute(relative);
+    }
+
+    private copyFolderRecursiveSync(source: string, target: string) {
+        if (!fs.existsSync(target)) {
+            fs.mkdirSync(target, { recursive: true });
+        }
+
+        if (fs.lstatSync(source).isDirectory()) {
+            const files = fs.readdirSync(source);
+            files.forEach(file => {
+                const curSource = path.join(source, file);
+                const curTarget = path.join(target, file);
+                if (fs.lstatSync(curSource).isDirectory()) {
+                    this.copyFolderRecursiveSync(curSource, curTarget);
+                } else {
+                    fs.copyFileSync(curSource, curTarget);
+                }
+            });
         }
     }
 

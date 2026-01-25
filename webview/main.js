@@ -294,6 +294,9 @@
     ctxMenuEl.innerHTML = `
         <div class="ctx-item" id="ctx-open-current">Open in Current Window</div>
         <div class="ctx-item" id="ctx-open-new">Open in New Window</div>
+        <div class="ctx-item" id="ctx-separator" style="height:1px; background:var(--border-color); margin:4px 0; display:none;"></div>
+        <div class="ctx-item" id="ctx-apply-skill" style="display:none;">Apply Skill</div>
+        <div class="ctx-item" id="ctx-delete-skill" style="display:none; color:var(--color-danger);">Delete Skill</div>
         <div class="ctx-item" id="ctx-reveal">Reveal in Finder</div>
     `;
     document.body.appendChild(ctxMenuEl);
@@ -315,6 +318,20 @@
     document.getElementById('ctx-reveal').addEventListener('click', () => {
         if (ctxMenuTarget) {
             vscode.postMessage({ type: 'revealInOS', path: ctxMenuTarget.path });
+            hideCtxMenu();
+        }
+    });
+
+    document.getElementById('ctx-delete-skill').addEventListener('click', () => {
+        if (ctxMenuTarget && ctxMenuTarget.path) {
+            vscode.postMessage({ type: 'deleteSkill', path: ctxMenuTarget.path });
+            hideCtxMenu();
+        }
+    });
+
+    document.getElementById('ctx-apply-skill').addEventListener('click', () => {
+        if (ctxMenuTarget && ctxMenuTarget.path) {
+            vscode.postMessage({ type: 'applySkill', path: ctxMenuTarget.path });
             hideCtxMenu();
         }
     });
@@ -348,18 +365,35 @@
                 // Determine type for menu items
                 const isGlobalHeader = targetEl.classList.contains('project-header') && targetEl.getAttribute('data-id') === 'global-skills';
                 const isNormalProject = targetEl.classList.contains('project-header') && !isGlobalHeader;
+                const isSkillRoot = targetEl.getAttribute('data-is-skill') === 'true';
 
                 // Toggle visibility based on type
                 const itemOpenCurrent = document.getElementById('ctx-open-current');
                 const itemOpenNew = document.getElementById('ctx-open-new');
+                const itemSeparator = document.getElementById('ctx-separator');
+                const itemApply = document.getElementById('ctx-apply-skill');
+                const itemDelete = document.getElementById('ctx-delete-skill');
 
                 if (isNormalProject) {
                     itemOpenCurrent.style.display = 'block';
                     itemOpenNew.style.display = 'block';
+                    itemSeparator.style.display = 'none';
+                    itemApply.style.display = 'none';
+                    itemDelete.style.display = 'none';
                 } else {
-                    // Global Skills header, sub-folders, files -> Only Reveal
+                    // Global Skills header, sub-folders, files -> Open Hidden
                     itemOpenCurrent.style.display = 'none';
                     itemOpenNew.style.display = 'none';
+
+                    if (isSkillRoot) {
+                        itemSeparator.style.display = 'block';
+                        itemApply.style.display = 'block';
+                        itemDelete.style.display = 'block';
+                    } else {
+                        itemSeparator.style.display = 'none';
+                        itemApply.style.display = 'none';
+                        itemDelete.style.display = 'none';
+                    }
                 }
 
                 // Adjust position to stay in bounds
@@ -802,12 +836,13 @@
             if (node.type === 'directory') {
                 const uniqueId = getStableId(`skill-${projectId}`, node.path);
                 const isExpanded = expandedFolders.has(uniqueId);
-                // Top level folders (depth 0) get the Blue Dot
+                // Top level folders (depth 0) get the Blue Dot and are marked as Skill Roots
                 const dotHtml = depth === 0 ? '<span class="dot blue"></span>' : '';
+                const isSkillAttr = depth === 0 ? 'data-is-skill="true"' : '';
 
                 html += `
                     <div class="skill-item">
-                        <div class="folder-header" data-target="${uniqueId}" data-path="${node.path}" style="padding-left: 0;">
+                        <div class="folder-header" data-target="${uniqueId}" data-path="${node.path}" ${isSkillAttr} style="padding-left: 0;">
                             <span class="folder-arrow ${isExpanded ? '' : 'collapsed'}">▼</span>
                             ${dotHtml}
                             <span>${node.name}</span>
