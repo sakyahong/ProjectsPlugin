@@ -146,12 +146,19 @@
                 break;
             case 'usageUpdate':
                 quotaGroups = message.groups || [];
+                // Update status if provided
+                if (message.status) {
+                    console.log('[UI] Connection status:', message.status);
+                    const statusEl = document.getElementById('connection-status');
+                    if (statusEl) statusEl.textContent = message.status;
+                }
                 // Default to first group if no selection
                 if (!selectedGroupId && quotaGroups.length > 0) {
                     selectedGroupId = quotaGroups[0].id;
                 }
                 renderUsage();
                 break;
+
             case 'conversationsUpdate':
                 console.log('[UI] Conversations update received:', message.conversations?.length);
                 if (message.conversations && message.conversations.length > 0) {
@@ -787,17 +794,29 @@
             return;
         }
 
-        const projectConvos = allConvos.filter(c => {
+        // 1. Try to find matching convos
+        let projectConvos = allConvos.filter(c => {
             if (!c.workspacePath) return false;
             const normC = decodeURIComponent(c.workspacePath.replace(/^file:\/\//, '')).toLowerCase();
             const normP = decodeURIComponent(project.path.replace(/^file:\/\//, '')).toLowerCase();
-            return normC.includes(normP);
+            return normC.includes(normP) || normP.includes(normC);
         });
 
+        let isFallback = false;
         if (projectConvos.length === 0) {
-            container.innerHTML = '<div class="folder-empty">No active chats</div>';
+            // Fallback: If this is the ACTIVE project, show all recent chats
+            const isActive = activeProjectPath && (activeProjectPath.toLowerCase() === project.path.toLowerCase());
+            if (isActive) {
+                projectConvos = allConvos.slice(0, 5);
+                isFallback = true;
+            }
+        }
+
+        if (projectConvos.length === 0) {
+            container.innerHTML = '<div class="folder-empty">No associated chats</div>';
             return;
         }
+
 
         const limit = 10;
         const currentConvos = projectConvos.slice(0, limit);

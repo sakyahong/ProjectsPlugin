@@ -13,19 +13,33 @@ export class SkillService {
      * Scans the project for .agent/skills and returns a structure of skills.
      */
     async getSkillsForProject(projectPath: string): Promise<SkillNode[]> {
-        let skillsDirName = '.agent/skills';
-        let fullPath = path.join(projectPath, skillsDirName);
-
-        if (!fs.existsSync(fullPath)) {
-            skillsDirName = '.agent/Skills';
-            fullPath = path.join(projectPath, skillsDirName);
-            if (!fs.existsSync(fullPath)) {
-                return [];
-            }
+        const agentDirPath = path.join(projectPath, '.agent');
+        if (!fs.existsSync(agentDirPath)) {
+            return [];
         }
 
-        return this.getSkillsFromPath(fullPath);
+        try {
+            const items = await fs.promises.readdir(agentDirPath);
+            // Case-insensitive search for 'skills' directory
+            const skillsDir = items.find(item => item.toLowerCase() === 'skills');
+
+            if (!skillsDir) {
+                return [];
+            }
+
+            const fullPath = path.join(agentDirPath, skillsDir);
+            const stats = await fs.promises.stat(fullPath);
+            if (!stats.isDirectory()) {
+                return [];
+            }
+
+            return this.getSkillsFromPath(fullPath);
+        } catch (error) {
+            console.error(`Error scanning for skills in ${projectPath}:`, error);
+            return [];
+        }
     }
+
 
     async getSkillsFromPath(fullPath: string): Promise<SkillNode[]> {
         if (!fs.existsSync(fullPath)) {

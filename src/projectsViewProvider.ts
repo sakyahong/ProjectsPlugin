@@ -20,8 +20,10 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     private conversationService: ConversationService;
     private skillService: SkillService;
     private quotaTimer?: NodeJS.Timeout;
+    private backgroundDetectorTimer?: NodeJS.Timeout;
     private cachedPort?: number;
     private cachedCsrfToken?: string;
+    private isDetecting: boolean = false;
 
     private conversationTimer?: NodeJS.Timeout;
     private autoSyncTimer?: NodeJS.Timeout;
@@ -44,6 +46,11 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         this.conversationTimer = setInterval(() => {
             this.fetchAndSendConversations();
         }, 30000);
+
+        // Background Detector Polling (every 15s)
+        this.backgroundDetectorTimer = setInterval(() => {
+            this.runBackgroundDetection();
+        }, 15000);
 
         // Auto-sync for projects (every 10s) to detect changes from other windows
         this.autoSyncTimer = setInterval(() => {
@@ -123,7 +130,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 case 'refresh':
                 case 'onLoad':
                     this.refresh();
-                    this.initQuotaFetching();
+                    this.triggerAsyncLoad();
                     break;
             }
         });
@@ -286,25 +293,40 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async initQuotaFetching() {
+    private async triggerAsyncLoad() {
+        // Run detection if needed, then fire both Quota and Conversation fetches in parallel
+        await this.runBackgroundDetection();
+        this.fetchAndSendQuota();
+        this.fetchAndSendConversations();
+    }
+
+    private async runBackgroundDetection() {
+        if (this.isDetecting) return;
+        this.isDetecting = true;
         try {
+            console.log('[Detector] Background detection triggered');
             const processInfo = await this.portDetector.detect();
             if (processInfo) {
-                // Cache port and token for conversation fetching
                 this.cachedPort = processInfo.connectPort;
                 this.cachedCsrfToken = processInfo.csrfToken;
-
-                this.fetchAndSendQuota();
-
-                // Poll every 5 seconds
-                if (this.quotaTimer) clearInterval(this.quotaTimer);
-                this.quotaTimer = setInterval(() => this.fetchAndSendQuota(), 5000);
+                console.log(`[Detector] Service found on port ${this.cachedPort}`);
             } else {
-                // console.log('Antigravity language server process not found.');
+                console.log('[Detector] Service not found');
             }
         } catch (error) {
-            console.error('Failed to initialize quota fetching:', error);
+            console.error('[Detector] Detection failed:', error);
+        } finally {
+            this.isDetecting = false;
         }
+    }
+
+    private async initQuotaFetching() {
+        // Trigger once immediately
+        this.triggerAsyncLoad();
+
+        // Ensure periodic refresh
+        if (this.quotaTimer) clearInterval(this.quotaTimer);
+        this.quotaTimer = setInterval(() => this.fetchAndSendQuota(), 30000); // 30s for quota is enough
     }
 
     public refreshQuota() {
@@ -338,32 +360,28 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
             this._view.webview.postMessage({
                 type: 'usageUpdate',
-                groups: uiGroups
+                groups: uiGroups,
+                status: `Connected to :${this.cachedPort}`
             });
         } catch (error: any) {
+            this._view.webview.postMessage({
+                type: 'usageUpdate',
+                groups: [],
+                status: `Error: ${error.message}`
+            });
             // Suppress initialization error as it's transient
             if (error.message && error.message.includes('LanguageServerClient must be initialized first')) {
                 return;
             }
             console.error('Failed to fetch quota:', error);
         }
+
     }
 
     private async fetchAndSendConversations(projectPath?: string) {
-        // ... (detection logic)
         if (!this.cachedPort || !this.cachedCsrfToken) {
-            try {
-                const processInfo = await this.portDetector.detect();
-                if (processInfo) {
-                    this.cachedPort = processInfo.connectPort;
-                    this.cachedCsrfToken = processInfo.csrfToken;
-                } else {
-                    return null; // Return null if not ready
-                }
-            } catch (error) {
-                console.error('Failed to detect port:', error);
-                return null;
-            }
+            console.log('[Conversations] Skipping fetch: no cached service info');
+            return null;
         }
 
         if (!this._view) return null;
@@ -567,8 +585,8 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 console.error(`[GlobalSkills] Error:`, err);
             }
 
-            // Also fetch conversations
-            const conversations = await this.fetchAndSendConversations();
+            // Trigger async updates (Conversations & Quota) without blocking UI
+            setTimeout(() => this.triggerAsyncLoad(), 0);
 
             console.log('[Refresh] Sending update to webview');
             this._view.webview.postMessage({
@@ -584,14 +602,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     exists: fs.existsSync(globalSkillsPath),
                     count: globalSkills.length
                 },
-                activeProjectPath: activeProjectPath,
-                conversations: conversations && conversations.length > 0 ? conversations.map(c => ({
-                    id: c.cascadeId,
-                    title: c.title,
-                    timeAgo: c.timeAgo,
-                    lastModifiedAt: c.lastModifiedAt,
-                    workspacePath: c.workspacePath
-                })) : undefined
+                activeProjectPath: activeProjectPath
             });
         }
     }
@@ -625,7 +636,11 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     <div id="project-list"></div>
 
                     <div class="footer">
+                        <div id="connection-status" style="font-size: 9px; color: var(--muted-text); padding: 4px 8px; border-bottom: 1px solid var(--border-color); text-align: right;">
+                            Detecting...
+                        </div>
                         <div class="usage-display">
+
                             <!-- Groups Overview -->
                             <div class="usage-groups" id="usage-groups">
                                 <!-- Injected by JS -->

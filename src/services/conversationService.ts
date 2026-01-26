@@ -1,62 +1,83 @@
-import * as https from 'https';
+import * as http from 'http';
 import { Conversation } from '../types';
 
 export class ConversationService {
     // Fetch conversations from the Language Server API
-    async fetchConversations(port: number, csrfToken: string): Promise<Conversation[]> {
-        // Use same format as quotaService which works
-        const data = JSON.stringify({});
+    async fetchConversations(port: number, csrfToken: string, retries = 3): Promise<Conversation[]> {
+        return new Promise((resolve) => {
+            const attempt = (remaining: number) => {
+                const data = JSON.stringify({
+                    metadata: { ideName: 'antigravity', extensionName: 'antigravity', ideVersion: '1.0.0', locale: 'en' }
+                });
+                const options = {
+                    hostname: '127.0.0.1',
+                    port: port,
+                    path: '/exa.language_server_pb.LanguageServerService/GetAllCascadeTrajectories',
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Content-Length': Buffer.byteLength(data),
+                        'X-Codeium-Csrf-Token': csrfToken,
+                        'Connect-Protocol-Version': '1'
+                    },
+                    timeout: 5000
+                };
 
-        const options = {
-            hostname: '127.0.0.1',
-            port: port,
-            path: '/exa.language_server_pb.LanguageServerService/GetAllCascadeTrajectories',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(data),
-                'X-Codeium-Csrf-Token': csrfToken,
-                'Connect-Protocol-Version': '1'
-            },
-            rejectUnauthorized: false
-        };
-
-        return new Promise((resolve, reject) => {
-            const req = https.request(options, (res) => {
-                let body = '';
-                res.on('data', chunk => { body += chunk; });
-                res.on('end', () => {
-                    console.log('Conversations API status:', res.statusCode);
-                    if (res.statusCode === 200) {
-                        try {
-                            const response = JSON.parse(body);
-                            console.log('Conversations API raw response:', JSON.stringify(response).substring(0, 500));
-                            const conversations = this.processConversationsResponse(response);
-                            console.log(`Parsed ${conversations.length} conversations`);
-                            resolve(conversations);
-                        } catch (e) {
-                            console.error('Failed to parse conversations response:', e);
-                            resolve([]);
+                const req = http.request(options, (res) => {
+                    let body = '';
+                    res.on('data', chunk => { body += chunk; });
+                    res.on('end', () => {
+                        if (res.statusCode === 200) {
+                            try {
+                                const response = JSON.parse(body);
+                                const conversations = this.processConversationsResponse(response);
+                                resolve(conversations);
+                            } catch (e) {
+                                if (remaining > 0) {
+                                    setTimeout(() => attempt(remaining - 1), 1000);
+                                } else {
+                                    resolve([]);
+                                }
+                            }
+                        } else {
+                            if (remaining > 0) {
+                                setTimeout(() => attempt(remaining - 1), 1000);
+                            } else {
+                                resolve([]);
+                            }
                         }
+                    });
+                });
+
+                req.on('error', error => {
+                    if (remaining > 0) {
+                        setTimeout(() => attempt(remaining - 1), 1000);
                     } else {
-                        console.error(`Conversations API failed with status ${res.statusCode}, body:`, body.substring(0, 200));
                         resolve([]);
                     }
                 });
-            });
 
-            req.on('error', error => {
-                console.error('Conversations API error:', error);
-                resolve([]);
-            });
-            req.write(data);
-            req.end();
+                req.on('timeout', () => {
+                    req.destroy();
+                    if (remaining > 0) {
+                        attempt(remaining - 1);
+                    } else {
+                        resolve([]);
+                    }
+                });
+
+                req.write(data);
+                req.end();
+            };
+
+            attempt(retries);
         });
     }
 
+
     // Test LoadTrajectory API to get detailed info including workspace
     async loadTrajectoryDetails(port: number, csrfToken: string, trajectoryId: string): Promise<any> {
-        const data = JSON.stringify({ trajectoryId });
+        const data = JSON.stringify({ trajectoryId, metadata: { ideName: 'antigravity' } });
 
         const options = {
             hostname: '127.0.0.1',
@@ -69,35 +90,28 @@ export class ConversationService {
                 'X-Codeium-Csrf-Token': csrfToken,
                 'Connect-Protocol-Version': '1'
             },
-            rejectUnauthorized: false
+            timeout: 5000
         };
 
-        return new Promise((resolve, reject) => {
-            const req = https.request(options, (res) => {
+        return new Promise((resolve) => {
+            const req = http.request(options, (res) => {
                 let body = '';
                 res.on('data', chunk => { body += chunk; });
                 res.on('end', () => {
-                    console.log('LoadTrajectory API status:', res.statusCode);
                     if (res.statusCode === 200) {
                         try {
                             const response = JSON.parse(body);
-                            console.log('LoadTrajectory response (first 1000 chars):', JSON.stringify(response).substring(0, 1000));
                             resolve(response);
                         } catch (e) {
-                            console.error('Failed to parse LoadTrajectory response:', e);
                             resolve(null);
                         }
                     } else {
-                        console.error(`LoadTrajectory API failed with status ${res.statusCode}`);
                         resolve(null);
                     }
                 });
             });
 
-            req.on('error', error => {
-                console.error('LoadTrajectory API error:', error);
-                resolve(null);
-            });
+            req.on('error', () => resolve(null));
             req.write(data);
             req.end();
         });
@@ -106,7 +120,7 @@ export class ConversationService {
 
     // Fetch detailed steps for a conversation to find workspace context
     async getConversationSteps(port: number, csrfToken: string, cascadeId: string): Promise<any> {
-        const data = JSON.stringify({ cascadeId });
+        const data = JSON.stringify({ cascadeId, metadata: { ideName: 'antigravity' } });
         const options = {
             hostname: '127.0.0.1',
             port: port,
@@ -118,11 +132,11 @@ export class ConversationService {
                 'X-Codeium-Csrf-Token': csrfToken,
                 'Connect-Protocol-Version': '1'
             },
-            rejectUnauthorized: false
+            timeout: 5000
         };
 
         return new Promise((resolve) => {
-            const req = https.request(options, (res) => {
+            const req = http.request(options, (res) => {
                 let body = '';
                 res.on('data', chunk => { body += chunk; });
                 res.on('end', () => {
@@ -131,11 +145,9 @@ export class ConversationService {
                             const response = JSON.parse(body);
                             resolve(response);
                         } catch (e) {
-                            console.error(`Failed to parse steps for ${cascadeId}:`, e);
                             resolve(null);
                         }
                     } else {
-                        // Don't log 404s/500s too noisily for every conversation
                         resolve(null);
                     }
                 });
@@ -145,6 +157,7 @@ export class ConversationService {
             req.end();
         });
     }
+
 
     // Extract workspace path from conversation steps
     extractWorkspaceFromSteps(stepsResponse: any): string | null {

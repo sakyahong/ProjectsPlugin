@@ -1,6 +1,6 @@
 import * as cp from 'child_process';
 import * as util from 'util';
-import * as https from 'https';
+import * as http from 'http';
 
 const exec = util.promisify(cp.exec);
 
@@ -15,64 +15,79 @@ export class PortDetector {
 
     async detect(): Promise<ProcessInfo | null> {
         try {
-            console.log('Starting port detection...');
-            const basicInfo = await this.findProcessBasicInfo();
-            if (!basicInfo) {
-                console.log('Process basic info not found.');
+            console.log('[PortDetector] Starting multi-process port detection (HTTP)...');
+            const allProcessInfos = await this.findAllProcessBasicInfo();
+            if (allProcessInfos.length === 0) {
+                console.log('[PortDetector] No Antigravity-related processes found.');
                 return null;
             }
 
-            console.log('Found Antigravity process:', basicInfo.pid);
-            const ports = await this.findListeningPorts(basicInfo.pid);
-            console.log('Listening ports:', ports);
+            console.log(`[PortDetector] Found ${allProcessInfos.length} potential processes. Testing each...`);
 
-            const workingPort = await this.findWorkingPort(ports, basicInfo.csrfToken);
+            for (const info of allProcessInfos) {
+                console.log(`[PortDetector] Testing PID ${info.pid} on port ${info.extensionPort}...`);
+                const ports = await this.findListeningPorts(info.pid);
+                // Also include the extension port from args as a candidate
+                if (!ports.includes(info.extensionPort)) {
+                    ports.push(info.extensionPort);
+                }
 
-            if (workingPort) {
-                console.log('Found working API port:', workingPort);
-                return {
-                    ...basicInfo,
-                    connectPort: workingPort
-                };
-            } else {
-                console.log('No working API port found.');
+                console.log(`[PortDetector] PID ${info.pid} listening candidates: ${ports}`);
+
+                const workingPort = await this.findWorkingPort(ports, info.csrfToken);
+                if (workingPort) {
+                    console.log(`[PortDetector] SUCCESS: Found working API on PID ${info.pid}, Port ${workingPort}`);
+                    return {
+                        ...info,
+                        connectPort: workingPort
+                    };
+                }
+                console.log(`[PortDetector] PID ${info.pid} did not provide a working API.`);
             }
+
+            console.log('[PortDetector] Exhausted all potential processes. No working API found.');
         } catch (error) {
-            console.error('Failed to detect port:', error);
+            console.error('[PortDetector] Fatal detection error:', error);
         }
         return null;
     }
 
-    private async findProcessBasicInfo() {
+    private async findAllProcessBasicInfo(): Promise<{ pid: number; extensionPort: number; csrfToken: string }[]> {
         // macOS: ps -ww -eo pid,args
-        const cmd = `ps -ww -eo pid,args | grep "language_server" | grep -v grep`;
-        const { stdout } = await exec(cmd);
+        // We look for anything related to antigravity to be safe
+        const cmd = `ps -ww -eo pid,args | grep -i "antigravity" | grep -v grep`;
+        const results: { pid: number; extensionPort: number; csrfToken: string }[] = [];
 
-        if (!stdout) return null;
+        try {
+            const { stdout } = await exec(cmd);
+            if (!stdout) return [];
 
-        const lines = stdout.trim().split('\n');
-        for (const line of lines) {
-            const match = line.trim().match(/^(\d+)\s+(.+)$/);
-            if (!match) continue;
+            const lines = stdout.trim().split('\n');
+            for (const line of lines) {
+                const match = line.trim().match(/^(\d+)\s+(.+)$/);
+                if (!match) continue;
 
-            const pid = parseInt(match[1]);
-            const args = match[2];
+                const pid = parseInt(match[1]);
+                const args = match[2];
 
-            if (!args.includes('antigravity')) continue;
+                // Flexible extraction
+                const portMatch = args.match(/--extension_server_port[=\s]+(\d+)/);
+                const tokenMatch = args.match(/--csrf_token[=\s]+([a-f0-9-]+)/i);
 
-            const portMatch = args.match(/--extension_server_port[=\s]+(\d+)/);
-            const tokenMatch = args.match(/--csrf_token[=\s]+([a-f0-9-]+)/i);
-
-            if (portMatch && tokenMatch) {
-                return {
-                    pid,
-                    extensionPort: parseInt(portMatch[1]),
-                    csrfToken: tokenMatch[1]
-                };
+                if (portMatch && tokenMatch) {
+                    results.push({
+                        pid,
+                        extensionPort: parseInt(portMatch[1]),
+                        csrfToken: tokenMatch[1]
+                    });
+                }
             }
+        } catch (e) {
+            // grep might return error code 1 if nothing found, which is fine
         }
-        return null;
+        return results;
     }
+
 
     private async findListeningPorts(pid: number): Promise<number[]> {
         try {
@@ -93,7 +108,7 @@ export class PortDetector {
             }
             return ports;
         } catch (e) {
-            console.warn('lsof failed:', e);
+            // console.warn('lsof failed:', e);
             return [];
         }
     }
@@ -107,20 +122,12 @@ export class PortDetector {
 
     private testPort(port: number, token: string): Promise<boolean> {
         return new Promise((resolve) => {
-            // Use GetUnleashData with payload for testing as per open source reference
             const requestBody = JSON.stringify({
-                context: {
-                    properties: {
-                        devMode: "false",
-                        extensionVersion: "0.0.1",
-                        hasAnthropicModelAccess: "true",
-                        ide: "antigravity",
-                        ideVersion: "1.0.0", // Mock version
-                        installationId: "test-detection",
-                        language: "UNSPECIFIED",
-                        os: "darwin",
-                        requestedModelId: "MODEL_UNSPECIFIED"
-                    }
+                metadata: {
+                    ideName: "antigravity",
+                    extensionName: "antigravity",
+                    ideVersion: "1.0.0",
+                    locale: "en"
                 }
             });
 
@@ -131,15 +138,14 @@ export class PortDetector {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Content-Length': requestBody.length,
+                    'Content-Length': Buffer.byteLength(requestBody),
                     'X-Codeium-Csrf-Token': token,
                     'Connect-Protocol-Version': '1'
                 },
-                rejectUnauthorized: false,
                 timeout: 1000 // Give it a second
             };
 
-            const req = https.request(options, (res) => {
+            const req = http.request(options, (res) => {
                 if (res.statusCode === 200) {
                     resolve(true);
                 } else {

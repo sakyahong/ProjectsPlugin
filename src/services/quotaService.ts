@@ -1,4 +1,4 @@
-import * as https from 'https';
+import * as http from 'http';
 
 export interface QuotaInfo {
     modelName: string;
@@ -19,52 +19,81 @@ export interface GroupedQuota {
 export class QuotaService {
     constructor() { }
 
-    async getUserStatus(port: number, csrfToken: string): Promise<any> {
+    async getUserStatus(port: number, csrfToken: string, retries = 3): Promise<any> {
         return new Promise((resolve, reject) => {
-            const data = JSON.stringify({
-                metadata: {
-                    ideName: 'antigravity',
-                    extensionName: 'antigravity',
-                    ideVersion: '1.0.0',
-                    locale: 'en'
-                }
-            });
-
-            const options = {
-                hostname: '127.0.0.1',
-                port: port,
-                path: '/exa.language_server_pb.LanguageServerService/GetUserStatus',
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': data.length,
-                    'X-Codeium-Csrf-Token': csrfToken,
-                    'Connect-Protocol-Version': '1'
-                },
-                rejectUnauthorized: false
-            };
-
-            const req = https.request(options, res => {
-                let responseData = '';
-                res.on('data', chunk => { responseData += chunk; });
-                res.on('end', () => {
-                    if (res.statusCode === 200) {
-                        try {
-                            resolve(JSON.parse(responseData));
-                        } catch (e) {
-                            reject(new Error('Failed to parse response'));
-                        }
-                    } else {
-                        reject(new Error(`API request failed with status ${res.statusCode}`));
+            const attempt = (remaining: number) => {
+                const data = JSON.stringify({
+                    metadata: {
+                        ideName: 'antigravity',
+                        extensionName: 'antigravity',
+                        ideVersion: '1.0.0',
+                        locale: 'en'
                     }
                 });
-            });
 
-            req.on('error', error => { reject(error); });
-            req.write(data);
-            req.end();
+                const options = {
+                    hostname: '127.0.0.1',
+                    port: port,
+                    path: '/exa.language_server_pb.LanguageServerService/GetUserStatus',
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Content-Length': Buffer.byteLength(data),
+                        'X-Codeium-Csrf-Token': csrfToken,
+                        'Connect-Protocol-Version': '1'
+                    },
+                    timeout: 5000 // 5 seconds timeout
+                };
+
+                const req = http.request(options, res => {
+                    let responseData = '';
+                    res.on('data', chunk => { responseData += chunk; });
+                    res.on('end', () => {
+                        if (res.statusCode === 200) {
+                            try {
+                                resolve(JSON.parse(responseData));
+                            } catch (e) {
+                                if (remaining > 0) {
+                                    setTimeout(() => attempt(remaining - 1), 1000);
+                                } else {
+                                    reject(new Error('Failed to parse response'));
+                                }
+                            }
+                        } else {
+                            if (remaining > 0) {
+                                setTimeout(() => attempt(remaining - 1), 1000);
+                            } else {
+                                reject(new Error(`API failed with status ${res.statusCode}`));
+                            }
+                        }
+                    });
+                });
+
+                req.on('error', error => {
+                    if (remaining > 0) {
+                        setTimeout(() => attempt(remaining - 1), 1000);
+                    } else {
+                        reject(error);
+                    }
+                });
+
+                req.on('timeout', () => {
+                    req.destroy();
+                    if (remaining > 0) {
+                        attempt(remaining - 1);
+                    } else {
+                        reject(new Error('API request timed out'));
+                    }
+                });
+
+                req.write(data);
+                req.end();
+            };
+
+            attempt(retries);
         });
     }
+
 
     // Determine which group a model belongs to based on its label
     private getGroupForModel(label: string): { groupName: string; groupId: string } {
@@ -100,11 +129,13 @@ export class QuotaService {
             latestResetTime: string;
         }> = new Map();
 
-        if (userStatus.cascadeModelConfigData && userStatus.cascadeModelConfigData.clientModelConfigs) {
-            const configs = userStatus.cascadeModelConfigData.clientModelConfigs;
+        const modelConfigs = (userStatus.cascadeModelConfigData && userStatus.cascadeModelConfigData.clientModelConfigs) ||
+            (userStatus.modelConfigData && userStatus.modelConfigData.clientModelConfigs) ||
+            (userStatus.clientModelConfigs);
 
-            for (const config of configs) {
-                const label = config.label || 'Unknown Model';
+        if (modelConfigs) {
+            for (const config of modelConfigs) {
+                const label = config.label || config.modelName || 'Unknown Model';
                 const quotaInfo = config.quotaInfo || {};
                 const resetTime = quotaInfo.resetTime || '';
 
