@@ -127,6 +127,11 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                         this.handleApplySkill(data.path);
                     }
                     break;
+                case 'installSkill':
+                    if (data.path) {
+                        this.handleInstallSkill(data.path);
+                    }
+                    break;
                 case 'refresh':
                 case 'onLoad':
                     this.refresh();
@@ -298,6 +303,46 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         await this.runBackgroundDetection();
         this.fetchAndSendQuota();
         this.fetchAndSendConversations();
+    }
+
+    private async handleInstallSkill(targetParentPath: string) {
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            openLabel: 'Select Skill Folder to Install'
+        });
+
+        if (uris && uris.length > 0) {
+            const sourcePath = uris[0].fsPath;
+            const skillName = path.basename(sourcePath);
+            const destPath = path.join(targetParentPath, skillName);
+
+            try {
+                // Ensure target parent exists
+                if (!fs.existsSync(targetParentPath)) {
+                    fs.mkdirSync(targetParentPath, { recursive: true });
+                }
+
+                if (fs.existsSync(destPath)) {
+                    const confirm = await vscode.window.showWarningMessage(
+                        `Skill "${skillName}" already exists. Overwrite?`,
+                        'Yes', 'No'
+                    );
+                    if (confirm !== 'Yes') return;
+                }
+
+                this.copyFolderRecursiveSync(sourcePath, destPath);
+                vscode.window.showInformationMessage(`Skill "${skillName}" installed successfully.`);
+
+                // Refresh explicitly
+                this.refresh();
+                setTimeout(() => this.refresh(), 500);
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Failed to install skill: ${err.message}`);
+                console.error(err);
+            }
+        }
     }
 
     private async runBackgroundDetection() {

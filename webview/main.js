@@ -325,6 +325,10 @@
             <svg class="ctx-icon" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             Delete Skill
         </div>
+        <div class="ctx-item" id="ctx-install-skill" style="display:none;">
+            <svg class="ctx-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Install Skill
+        </div>
         <div class="ctx-item" id="ctx-reveal">
             <svg class="ctx-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
             Reveal in Finder
@@ -356,6 +360,13 @@
     document.getElementById('ctx-delete-skill').addEventListener('click', () => {
         if (ctxMenuTarget && ctxMenuTarget.path) {
             vscode.postMessage({ type: 'deleteSkill', path: ctxMenuTarget.path });
+            hideCtxMenu();
+        }
+    });
+
+    document.getElementById('ctx-install-skill').addEventListener('click', () => {
+        if (ctxMenuTarget && ctxMenuTarget.path) {
+            vscode.postMessage({ type: 'installSkill', path: ctxMenuTarget.path });
             hideCtxMenu();
         }
     });
@@ -404,27 +415,31 @@
                 const itemSeparator = document.getElementById('ctx-separator');
                 const itemApply = document.getElementById('ctx-apply-skill');
                 const itemDelete = document.getElementById('ctx-delete-skill');
+                const itemInstall = document.getElementById('ctx-install-skill');
+                const itemReveal = document.getElementById('ctx-reveal');
+
+                // Reset all
+                [itemOpenCurrent, itemOpenNew, itemSeparator, itemApply, itemDelete, itemInstall, itemReveal].forEach(el => el.style.display = 'none');
 
                 if (isNormalProject) {
                     itemOpenCurrent.style.display = 'flex';
                     itemOpenNew.style.display = 'flex';
-                    itemSeparator.style.display = 'none';
-                    itemApply.style.display = 'none';
-                    itemDelete.style.display = 'none';
+                    itemReveal.style.display = 'flex';
+                } else if (isGlobalHeader) {
+                    itemInstall.style.display = 'flex';
+                    itemReveal.style.display = 'flex';
+                } else if (targetEl.classList.contains('folder-header') && targetEl.getAttribute('data-type') === 'skills') {
+                    // Project Skills root
+                    itemInstall.style.display = 'flex';
+                    itemReveal.style.display = 'flex';
+                } else if (isSkillRoot) {
+                    // Specific Skill folder
+                    itemApply.style.display = 'flex';
+                    itemDelete.style.display = 'flex';
+                    itemReveal.style.display = 'flex';
                 } else {
-                    // Global Skills header, sub-folders, files -> Open Hidden
-                    itemOpenCurrent.style.display = 'none';
-                    itemOpenNew.style.display = 'none';
-
-                    if (isSkillRoot) {
-                        itemSeparator.style.display = 'none'; // No separator at top
-                        itemApply.style.display = 'flex';
-                        itemDelete.style.display = 'flex';
-                    } else {
-                        itemSeparator.style.display = 'none';
-                        itemApply.style.display = 'none';
-                        itemDelete.style.display = 'none';
-                    }
+                    // Files or subfolders
+                    itemReveal.style.display = 'flex';
                 }
 
                 // Adjust position to stay in bounds
@@ -747,7 +762,7 @@
             skillsContainer.className = 'folder-container';
             skillsContainer.setAttribute('data-type', 'skills');
             skillsContainer.innerHTML = `
-                <div class="folder-header" data-target="${skillsContentId}" data-path="${skillsPath}">
+                <div class="folder-header" data-target="${skillsContentId}" data-path="${skillsPath}" data-type="skills">
                     <span class="folder-arrow">▼</span>
                     <span>Skills</span>
                 </div>

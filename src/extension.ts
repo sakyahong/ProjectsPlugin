@@ -12,6 +12,11 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // Auto-focus view on startup
+    setTimeout(() => {
+        vscode.commands.executeCommand('antigravity.projectsView.focus');
+    }, 100);
+
     context.subscriptions.push(
         vscode.commands.registerCommand('antigravity.projects.addProject', () => {
             provider.addProject();
