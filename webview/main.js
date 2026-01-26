@@ -7,6 +7,7 @@
     let sessions = {};
     let skills = {};
     let globalSkills = undefined;
+
     let globalSkillsPath = null; // Store global path
     let activeProjectPath = null;
     let conversations = {};  // Map of projectPath -> conversations array
@@ -77,13 +78,14 @@
                 }));
                 let changed = false;
 
-                if (message.projects && message.projects.length > 0) {
+                if (message.projects) {
                     // Check if projects list actually changed to avoid layout thrashing
                     const prevIds = projects.map(p => p.id).join(',');
                     const nextIds = message.projects.map(p => p.id).join(',');
                     if (prevIds !== nextIds || projects.length !== message.projects.length) {
                         projects = message.projects;
                         changed = true;
+                        console.log('[UI][DEBUG] Projects list updated, count:', projects.length);
                     } else {
                         // Just update individual project data
                         projects = message.projects;
@@ -93,27 +95,31 @@
                 if (message.sessions) {
                     const nextSessions = JSON.stringify(message.sessions);
                     if (JSON.stringify(sessions) !== nextSessions) {
-                        Object.assign(sessions, message.sessions);
+                        sessions = message.sessions; // DIRECT OVERWRITE (to fix deletion sync)
                         changed = true;
-                        console.log('[UI] Sessions data changed');
+                        console.log('[UI][DEBUG] Sessions updated');
                     }
                 }
 
                 if (message.skills) {
                     const nextSkills = JSON.stringify(message.skills);
                     if (JSON.stringify(skills) !== nextSkills) {
-                        Object.assign(skills, message.skills);
+                        skills = message.skills; // DIRECT OVERWRITE (to fix deletion sync)
                         changed = true;
-                        console.log('[UI] Skills data changed');
+                        console.log('[UI][DEBUG] Skills updated');
                     }
                 }
 
                 if (message.globalSkills !== undefined) {
-                    globalSkills = message.globalSkills;
-                    if (message.globalSkillsPath) globalSkillsPath = message.globalSkillsPath; // Capture path
-                    changed = true;
-                    console.log('[UI] Global Skills updated:', globalSkills.length);
+                    const nextGlobal = JSON.stringify(message.globalSkills);
+                    if (JSON.stringify(globalSkills) !== nextGlobal) {
+                        globalSkills = message.globalSkills;
+                        if (message.globalSkillsPath) globalSkillsPath = message.globalSkillsPath;
+                        changed = true;
+                        console.log('[UI][DEBUG] Global Skills updated');
+                    }
                 }
+
 
                 if (message.conversations && message.conversations.length > 0) {
                     // Safety merge: Do not lose workspace paths we already know
@@ -139,7 +145,7 @@
                 }
 
                 // Only render if something meaningful changed
-                if ((projects.length > 0 || globalSkills) && changed) {
+                if (changed) {
                     console.log('[UI] Scheduling renderProjects due to changes');
                     debouncedRenderProjects();
                 }
@@ -162,19 +168,22 @@
             case 'conversationsUpdate':
                 console.log('[UI] Conversations update received:', message.conversations?.length);
                 if (message.conversations && message.conversations.length > 0) {
-                    // Also apply safety merge here, though it's usually the enriched source
+                    let hasNewPath = false;
                     message.conversations.forEach(newC => {
                         const oldC = allConversations.find(oc => oc.id === newC.id);
+                        if (newC.workspacePath) {
+                            if (!oldC || oldC.workspacePath !== newC.workspacePath) {
+                                hasNewPath = true;
+                            }
+                        }
                         if (oldC && oldC.workspacePath && !newC.workspacePath) {
                             newC.workspacePath = oldC.workspacePath;
                         }
                     });
 
-                    const nextConvs = JSON.stringify(message.conversations.map(c => c.id + (c.workspacePath || '')));
-                    const prevConvs = JSON.stringify(allConversations.map(c => c.id + (c.workspacePath || '')));
-                    if (nextConvs !== prevConvs) {
+                    if (hasNewPath || allConversations.length !== message.conversations.length) {
                         allConversations = message.conversations;
-                        console.log('[UI] Conversations changed after enrichment, scheduling render');
+                        console.log('[UI] Conversations enriched with new paths, scheduling render');
                         debouncedRenderProjects();
                     }
                 }
@@ -795,18 +804,34 @@
         }
 
         // 1. Try to find matching convos
+        function normalizePath(p) {
+            if (!p) return '';
+            // Handle file:// protocol, normalize slashes, and lowercase for robust comparison
+            return decodeURIComponent(p.replace(/^file:\/\//, ''))
+                .replace(/\\/g, '/')
+                .replace(/\/$/, '')
+                .toLowerCase();
+        }
+
+        const projectPathNorm = normalizePath(project.path);
+
         let projectConvos = allConvos.filter(c => {
             if (!c.workspacePath) return false;
-            const normC = decodeURIComponent(c.workspacePath.replace(/^file:\/\//, '')).toLowerCase();
-            const normP = decodeURIComponent(project.path.replace(/^file:\/\//, '')).toLowerCase();
-            return normC.includes(normP) || normP.includes(normC);
+            const convoPathNorm = normalizePath(c.workspacePath);
+            // Use includes for better compatibility with partial paths from backend,
+            // but ensure it's a meaningful match
+            return convoPathNorm === projectPathNorm ||
+                convoPathNorm.indexOf(projectPathNorm + '/') !== -1 ||
+                projectPathNorm.indexOf(convoPathNorm) !== -1;
         });
 
         let isFallback = false;
         if (projectConvos.length === 0) {
-            // Fallback: If this is the ACTIVE project, show all recent chats
-            const isActive = activeProjectPath && (activeProjectPath.toLowerCase() === project.path.toLowerCase());
+            // Fallback: If this is the ACTIVE project, show all recent chats that DON'T belong elsewhere
+            const isActive = activeProjectPath && (normalizePath(activeProjectPath) === projectPathNorm);
             if (isActive) {
+                // To avoid duplication, we could filter out conversations that are matched by other projects
+                // but for simplicity and speed, we'll just show the latest 5
                 projectConvos = allConvos.slice(0, 5);
                 isFallback = true;
             }

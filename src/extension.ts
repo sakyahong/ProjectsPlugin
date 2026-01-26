@@ -18,11 +18,6 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('antigravity.projects.refresh', () => {
-            provider.refresh();
-        })
-    );
 
     // Check for pending conversation to open (after window reload/project switch)
     const pendingChat = context.globalState.get<{ id: string, timestamp: number }>('pendingOpenConversation');

@@ -42,20 +42,20 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
         // Live Watcher for Skills is now handled by refreshWatchers() per project
 
-        // Polling for Conversations (every 30s)
+        // Polling for Conversations (every 15s)
         this.conversationTimer = setInterval(() => {
             this.fetchAndSendConversations();
-        }, 30000);
+        }, 15000);
 
         // Background Detector Polling (every 15s)
         this.backgroundDetectorTimer = setInterval(() => {
             this.runBackgroundDetection();
         }, 15000);
 
-        // Auto-sync for projects (every 10s) to detect changes from other windows
+        // Auto-sync for projects (every 5s) to detect changes from other windows
         this.autoSyncTimer = setInterval(() => {
             this.checkAndRefreshIfProjectsChanged();
-        }, 10000);
+        }, 5000);
 
         context.subscriptions.push({
             dispose: () => {
@@ -181,10 +181,10 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
         if (confirm === 'Delete') {
             try {
-                // Compatible recursive delete
                 fs.rmSync(skillPath, { recursive: true, force: true });
-                // Refresh happens via watcher usually, but manual refresh is safer
+                // Refresh twice to ensure watcher and manual sync are both caught
                 this.refresh();
+                setTimeout(() => this.refresh(), 500);
             } catch (err: any) {
                 vscode.window.showErrorMessage(`Failed to delete skill: ${err.message}`);
             }
@@ -512,13 +512,39 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    private checkAndRefreshIfProjectsChanged() {
+    private async checkAndRefreshIfProjectsChanged() {
         const projects = this.projectStore.getProjects();
-        const currentPaths = projects.map(p => this.normalizePath(p.path)).sort().join('|');
-        if ((this as any)._lastAutoSyncPaths !== currentPaths) {
-            console.log('[AutoSync] Projects changed in storage, refreshing...');
+        let changed = false;
+
+        // Verify existence during sync
+        for (const project of projects) {
+            if (!fs.existsSync(project.path)) {
+                console.log(`[AutoSync] Project folder missing, cleaning up: ${project.path}`);
+                await this.projectStore.deleteProject(project.id);
+                changed = true;
+            }
+        }
+
+        const finalProjects = this.projectStore.getProjects();
+        const currentPaths = finalProjects.map(p => this.normalizePath(p.path)).sort().join('|');
+        if ((this as any)._lastAutoSyncPaths !== currentPaths || changed) {
+            console.log('[AutoSync] Projects list or files changed, refreshing UI...');
             (this as any)._lastAutoSyncPaths = currentPaths;
             this.refresh();
+        }
+    }
+
+    private async checkAndAutoAddWorkspace() {
+        const folders = vscode.workspace.workspaceFolders;
+        if (folders && folders.length > 0) {
+            const projects = this.projectStore.getProjects();
+            for (const folder of folders) {
+                const normPath = this.normalizePath(folder.uri.fsPath);
+                if (!projects.some(p => this.normalizePath(p.path) === normPath)) {
+                    console.log(`[AutoAdd] Adding workspace folder to projects: ${normPath}`);
+                    await this.projectStore.addProject(folder.name, normPath);
+                }
+            }
         }
     }
 
@@ -533,7 +559,22 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     public async refresh() {
         console.log('[Refresh] refresh() called');
         if (this._view) {
-            const projects = this.projectStore.getProjects();
+            // Auto add current workspace if missing
+            await this.checkAndAutoAddWorkspace();
+
+            const allProjects = this.projectStore.getProjects();
+            const projects: Project[] = [];
+
+            // Cleanup missing projects first
+            for (const project of allProjects) {
+                if (!fs.existsSync(project.path)) {
+                    console.log(`[Cleanup] Project folder no longer exists, removing from store: ${project.path}`);
+                    await this.projectStore.deleteProject(project.id);
+                } else {
+                    projects.push(project);
+                }
+            }
+
             this.refreshWatchers();
 
             const projectSessions: { [key: string]: Session[] } = {};
@@ -550,10 +591,8 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     const sessions = await this.sessionParser.getSessionsForProject(normPath);
                     projectSessions[project.id] = sessions.slice(0, 3);
                     const skills = await this.skillService.getSkillsForProject(normPath);
-                    // Only update if skills were successfully fetched or the directory exists
-                    if (skills && (skills.length > 0 || fs.existsSync(path.join(normPath, '.agent/skills')) || fs.existsSync(path.join(normPath, '.agent/Skills')))) {
-                        projectSkills[project.id] = skills;
-                    }
+                    // Always set, even if empty, to ensure UI state sync
+                    projectSkills[project.id] = skills;
                 } catch (error) {
                     console.error(`Failed to load data for project ${project.name}:`, error);
                 }
@@ -561,29 +600,20 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
             // Fetch Global Skills
             const globalSkillsPath = path.join(os.homedir(), '.gemini/antigravity/global_skills');
-            console.log(`[GlobalSkills] Detecting in: ${globalSkillsPath}`);
 
             // Ensure directory exists
             if (!fs.existsSync(globalSkillsPath)) {
                 try {
                     fs.mkdirSync(globalSkillsPath, { recursive: true });
-                    console.log(`[GlobalSkills] Created missing directory: ${globalSkillsPath}`);
-                } catch (err) {
-                    console.error(`[GlobalSkills] Failed to create directory: ${err}`);
-                }
+                } catch (err) { }
             }
 
             let globalSkills: any[] = [];
             try {
                 if (fs.existsSync(globalSkillsPath)) {
                     globalSkills = await this.skillService.getSkillsFromPath(globalSkillsPath);
-                    console.log(`[GlobalSkills] Found ${globalSkills.length} skills`);
-                } else {
-                    console.log(`[GlobalSkills] Path does not exist: ${globalSkillsPath}`);
                 }
-            } catch (err) {
-                console.error(`[GlobalSkills] Error:`, err);
-            }
+            } catch (err) { }
 
             // Trigger async updates (Conversations & Quota) without blocking UI
             setTimeout(() => this.triggerAsyncLoad(), 0);
@@ -593,19 +623,14 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 type: 'update',
                 projects: projects,
                 sessions: projectSessions,
-                skills: Object.keys(projectSkills).length > 0 ? projectSkills : undefined,
-                globalSkills: globalSkills, // ALWAYS send, even if empty, to help debugging
-                globalSkillsPath: globalSkillsPath, // Send path to frontend
-                debug: {
-                    homedir: os.homedir(),
-                    globalPath: globalSkillsPath,
-                    exists: fs.existsSync(globalSkillsPath),
-                    count: globalSkills.length
-                },
+                skills: projectSkills, // Always send the object
+                globalSkills: globalSkills,
+                globalSkillsPath: globalSkillsPath,
                 activeProjectPath: activeProjectPath
             });
         }
     }
+
 
     private normalizePath(p: string): string {
         // DO NOT use toLowerCase() here, as macOS and other OSes might have
@@ -670,46 +695,58 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
         let updatedCount = 0;
 
-        // Process in chunks to avoid flooding the API
+        // Process in chunks to avoid flooding the API, but parallelize within chunks
         const chunkSize = 5;
         for (let i = 0; i < conversations.length; i += chunkSize) {
             const chunk = conversations.slice(i, i + chunkSize);
-            const promises = chunk.map(async (convo) => {
-                // Skip if already has workspace path
+
+            // Fetch this chunk in parallel
+            await Promise.all(chunk.map(async (convo) => {
+                // Skip if already has workspace path in cache or object
                 if (convo.workspacePath) return;
 
-                const steps = await this.conversationService.getConversationSteps(
-                    port,
-                    token,
-                    convo.cascadeId
-                );
+                try {
+                    const steps = await this.conversationService.getConversationSteps(
+                        port,
+                        token,
+                        convo.cascadeId
+                    );
 
-                const workspacePath = this.conversationService.extractWorkspaceFromSteps(steps);
-                if (workspacePath) {
-                    convo.workspacePath = workspacePath;
-                    this.conversationPathCache.set(convo.cascadeId, workspacePath);
-                    updatedCount++;
+                    const workspacePath = this.conversationService.extractWorkspaceFromSteps(steps);
+                    if (workspacePath) {
+                        convo.workspacePath = workspacePath;
+                        this.conversationPathCache.set(convo.cascadeId, workspacePath);
+                        updatedCount++;
+                    }
+                } catch (err) {
+                    console.error(`[Enrich] Failed for ${convo.cascadeId}:`, err);
                 }
-            });
+            }));
 
-            await Promise.all(promises);
-
-        }
-
-        // Send a single final update after all chunks are processed
-        if (updatedCount > 0 && this._view) {
-            this._view.webview.postMessage({
-                type: 'conversationsUpdate',
-                conversations: conversations.map(c => ({
-                    id: c.cascadeId,
-                    title: c.title,
-                    timeAgo: c.timeAgo,
-                    lastModifiedAt: c.lastModifiedAt,
-                    workspacePath: c.workspacePath
-                }))
-            });
+            // Immediate partial update to UI for better perceived speed
+            if (updatedCount > 0 && this._view) {
+                this.sendConversationUpdate(conversations);
+                updatedCount = 0; // Reset for next chunk monitoring if needed,
+                // or just keep sending full updated list
+            }
         }
     }
+
+    private sendConversationUpdate(conversations: Conversation[]) {
+        if (!this._view) return;
+        this._view.webview.postMessage({
+            type: 'conversationsUpdate',
+            conversations: conversations.map(c => ({
+                id: c.cascadeId,
+                title: c.title,
+                timeAgo: c.timeAgo,
+                lastModifiedAt: c.lastModifiedAt,
+                workspacePath: c.workspacePath
+            }))
+        });
+    }
+
+    // Final update happens via the loop's sendConversationUpdate calls
 }
 
 function getNonce() {
