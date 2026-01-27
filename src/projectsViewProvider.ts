@@ -96,7 +96,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     }
                     break;
                 case 'handleChatClick':
-                    if (data.cascadeId && data.projectPath) {
+                    if (data.cascadeId) {
                         this.handleChatRequest(data.cascadeId, data.projectPath);
                     }
                     break;
@@ -137,19 +137,48 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     this.refresh();
                     this.triggerAsyncLoad();
                     break;
+                case 'requestFiles':
+                    if (data.projectId && data.path) {
+                        const files = await this.skillService.getSkillsFromPath(data.path);
+                        this._view?.webview.postMessage({
+                            type: 'filesUpdate',
+                            projectId: data.projectId,
+                            files: files
+                        });
+                    }
+                    break;
             }
         });
     }
 
-    private async handleChatRequest(cascadeId: string, projectPath: string) {
-        // Use normalized but case-preserving path for system commands
-        const targetPath = projectPath.replace(/^file:\/\//, '');
+    private async handleChatRequest(cascadeId: string, projectPath?: string) {
+        if (!projectPath) {
+            vscode.commands.executeCommand('antigravity.setVisibleConversation', cascadeId);
+            return;
+        }
 
-        // Use lowercased version ONLY for comparison logic
-        const currentWorkspaceLower = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath.toLowerCase();
+        // Robust path normalization
+        let decodedPath = projectPath.replace(/^file:\/\//, '');
+        try {
+            decodedPath = decodeURIComponent(decodedPath);
+        } catch (e) { }
+
+        const targetPath = this.normalizePath(decodedPath);
+        const currentWorkspaceFolders = vscode.workspace.workspaceFolders;
+        const currentPath = currentWorkspaceFolders && currentWorkspaceFolders.length > 0
+            ? this.normalizePath(currentWorkspaceFolders[0].uri.fsPath)
+            : null;
         const targetPathLower = targetPath.toLowerCase();
+        const currentPathLower = currentPath ? currentPath.toLowerCase() : null;
 
-        if (currentWorkspaceLower === targetPathLower) {
+        // Path comparison: Same project if one is a subpath of another
+        const isSameProject = currentPathLower && (
+            currentPathLower === targetPathLower ||
+            targetPathLower.startsWith(currentPathLower + '/') ||
+            currentPathLower.startsWith(targetPathLower + '/')
+        );
+
+        if (isSameProject) {
             // Same project, just open chat
             vscode.commands.executeCommand('antigravity.setVisibleConversation', cascadeId);
         } else {
@@ -164,12 +193,15 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             const uri = vscode.Uri.file(targetPath);
 
             if (action.includes('New Window')) {
+                // For new window, we can't easily auto-open the chat there without more complex state
+                // But we open the folder as requested.
                 vscode.commands.executeCommand('vscode.openFolder', uri, true);
             } else {
                 // Switch Window (Reloads extension)
-                // Persist pending chat
+                // Persist pending chat with timestamp to meet extension.ts requirement
                 await this.context.globalState.update('pendingOpenConversation', {
                     id: cascadeId,
+                    timestamp: Date.now()
                 });
                 vscode.commands.executeCommand('vscode.openFolder', uri, false);
             }
@@ -299,10 +331,18 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async triggerAsyncLoad() {
-        // Run detection if needed, then fire both Quota and Conversation fetches in parallel
-        await this.runBackgroundDetection();
-        this.fetchAndSendQuota();
-        this.fetchAndSendConversations();
+        // 1. If we have cached port/token, try to fetch immediately to show SOMETHING fast
+        if (this.cachedPort && this.cachedCsrfToken) {
+            this.fetchAndSendQuota();
+            this.fetchAndSendConversations();
+        }
+
+        // 2. Run detection in parallel/background to refresh port info
+        this.runBackgroundDetection().then(() => {
+            // 3. After detection finishes, re-fire to ensure we have latest data
+            this.fetchAndSendQuota();
+            this.fetchAndSendConversations();
+        });
     }
 
     private async handleInstallSkill(targetParentPath: string) {
@@ -405,14 +445,12 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
             this._view.webview.postMessage({
                 type: 'usageUpdate',
-                groups: uiGroups,
-                status: `Connected to :${this.cachedPort}`
+                groups: uiGroups
             });
         } catch (error: any) {
             this._view.webview.postMessage({
                 type: 'usageUpdate',
-                groups: [],
-                status: `Error: ${error.message}`
+                groups: []
             });
             // Suppress initialization error as it's transient
             if (error.message && error.message.includes('LanguageServerClient must be initialized first')) {
@@ -444,6 +482,9 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     if (cached) c.workspacePath = cached;
                 }
             });
+
+            // CRITICAL: Send initial list to UI immediately!
+            this.sendConversationUpdate(allConversations);
 
             // Fetch details in background (asynchronously)
             if (allConversations.length > 0) {
@@ -526,6 +567,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             // Pattern 3: Broader watcher for the .agent folder to be safe
             // Use both casing just in case
             const patterns = [
+                '**/*',
                 '.agent/skills/**/*',
                 '.agent/skills',
                 '.agent/Skills/**/*',
@@ -622,57 +664,72 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
             this.refreshWatchers();
 
-            const projectSessions: { [key: string]: Session[] } = {};
-            const projectSkills: { [key: string]: any[] } = {};
-
             let activeProjectPath: string | null = null;
             if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
                 activeProjectPath = this.normalizePath(vscode.workspace.workspaceFolders[0].uri.fsPath);
             }
 
-            for (const project of projects) {
-                try {
-                    const normPath = this.normalizePath(project.path);
-                    const sessions = await this.sessionParser.getSessionsForProject(normPath);
-                    projectSessions[project.id] = sessions.slice(0, 3);
-                    const skills = await this.skillService.getSkillsForProject(normPath);
-                    // Always set, even if empty, to ensure UI state sync
-                    projectSkills[project.id] = skills;
-                } catch (error) {
-                    console.error(`Failed to load data for project ${project.name}:`, error);
-                }
-            }
-
-            // Fetch Global Skills
-            const globalSkillsPath = path.join(os.homedir(), '.gemini/antigravity/global_skills');
-
-            // Ensure directory exists
-            if (!fs.existsSync(globalSkillsPath)) {
-                try {
-                    fs.mkdirSync(globalSkillsPath, { recursive: true });
-                } catch (err) { }
-            }
-
-            let globalSkills: any[] = [];
-            try {
-                if (fs.existsSync(globalSkillsPath)) {
-                    globalSkills = await this.skillService.getSkillsFromPath(globalSkillsPath);
-                }
-            } catch (err) { }
-
-            // Trigger async updates (Conversations & Quota) without blocking UI
-            setTimeout(() => this.triggerAsyncLoad(), 0);
-
-            console.log('[Refresh] Sending update to webview');
+            // --- PHASE 1: Immediate Update (Projects only for instant UI response) ---
             this._view.webview.postMessage({
                 type: 'update',
                 projects: projects,
-                sessions: projectSessions,
-                skills: projectSkills, // Always send the object
-                globalSkills: globalSkills,
-                globalSkillsPath: globalSkillsPath,
-                activeProjectPath: activeProjectPath
+                activeProjectPath: activeProjectPath,
+                partial: true
             });
+
+            // --- PHASE 2: Incremental Detail Loading ---
+            (async () => {
+                const projectSessions: { [key: string]: Session[] } = {};
+                const projectSkills: { [key: string]: any[] } = {};
+
+                for (const project of projects) {
+                    try {
+                        const normPath = this.normalizePath(project.path);
+                        const sessions = await this.sessionParser.getSessionsForProject(normPath);
+                        projectSessions[project.id] = sessions.slice(0, 3);
+                        const skills = await this.skillService.getSkillsForProject(normPath);
+                        projectSkills[project.id] = skills;
+
+                        // Push partial updates for each project
+                        this._view?.webview.postMessage({
+                            type: 'update',
+                            projects: projects,
+                            sessions: projectSessions,
+                            skills: projectSkills,
+                            activeProjectPath: activeProjectPath,
+                            partial: true
+                        });
+                    } catch (error) {
+                        console.error(`Failed to load data for project ${project.name}:`, error);
+                    }
+                }
+
+                // Global Skills last
+                const globalSkillsPath = path.join(os.homedir(), '.gemini/antigravity/global_skills');
+                if (!fs.existsSync(globalSkillsPath)) {
+                    try { fs.mkdirSync(globalSkillsPath, { recursive: true }); } catch (err) { }
+                }
+
+                let globalSkills: any[] = [];
+                try {
+                    if (fs.existsSync(globalSkillsPath)) {
+                        globalSkills = await this.skillService.getSkillsFromPath(globalSkillsPath);
+                    }
+                } catch (err) { }
+
+                this._view?.webview.postMessage({
+                    type: 'update',
+                    projects: projects,
+                    sessions: projectSessions,
+                    skills: projectSkills,
+                    globalSkills: globalSkills,
+                    globalSkillsPath: globalSkillsPath,
+                    activeProjectPath: activeProjectPath
+                });
+            })();
+
+            // Trigger async updates (Conversations & Quota)
+            setTimeout(() => this.triggerAsyncLoad(), 0);
         }
     }
 
@@ -706,23 +763,21 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     <div id="project-list"></div>
 
                     <div class="footer">
-                        <div id="connection-status" style="font-size: 9px; color: var(--muted-text); padding: 4px 8px; border-bottom: 1px solid var(--border-color); text-align: right;">
-                            Detecting...
-                        </div>
                         <div class="usage-display">
+                            <div class="usage-container-card">
+                                <!-- Groups Overview -->
+                                <div class="usage-groups" id="usage-groups">
+                                    <!-- Injected by JS -->
+                                </div>
 
-                            <!-- Groups Overview -->
-                            <div class="usage-groups" id="usage-groups">
-                                <!-- Injected by JS -->
-                            </div>
-
-                            <!-- Expandable List for Details -->
-                            <div class="usage-header-row" id="usage-header-row" title="Click to expand">
-                                <span class="toggle-label">Details</span>
-                                <div class="toggle-icon" id="toggle-icon">▼</div>
-                            </div>
-                            <div class="usage-list" id="usage-list">
-                                <!-- Injected by JS -->
+                                <!-- Expandable List for Details -->
+                                <div class="usage-header-row" id="usage-header-row" title="Click to expand">
+                                    <span class="toggle-label">Details</span>
+                                    <div class="toggle-icon" id="toggle-icon">▼</div>
+                                </div>
+                                <div class="usage-list" id="usage-list">
+                                    <!-- Injected by JS -->
+                                </div>
                             </div>
                         </div>
                     </div>

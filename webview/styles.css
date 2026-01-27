@@ -346,69 +346,132 @@ body {
 }
 
 /* Usage Display (Footer) */
+/* Usage Display (Footer) */
 .footer {
     padding: 12px;
     border-top: 1px solid var(--border-color);
+    background-color: transparent;
+}
+
+.usage-display {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Master Container Card */
+.usage-container-card {
     background-color: var(--header-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .usage-groups {
     display: flex;
     flex-direction: column;
-    gap: 10px;
 }
 
-.group-header {
+/* Embedded Item Card */
+.usage-card {
+    background-color: rgba(127, 127, 127, 0.08);
+    /* Slightly distinct from master card */
+    border: 1px solid rgba(127, 127, 127, 0.05);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.usage-card.clickable:hover {
+    background-color: var(--hover-background);
+    cursor: pointer;
+    transform: translateY(-1px);
+}
+
+.usage-card.selected {
+    border-color: var(--vscode-focusBorder);
+    background-color: rgba(127, 127, 127, 0.12);
+}
+
+.usage-card-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    margin-bottom: 4px;
+    align-items: baseline;
+    gap: 4px;
 }
 
-.group-name {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--foreground);
-}
-
-.group-reset {
-    font-size: 10px;
-    color: var(--muted-text);
-}
-
-.group-bar-row {
+.usage-card-title-group {
     display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.group-bar-container {
-    height: 5px;
+    align-items: baseline;
+    gap: 4px;
     flex: 1;
-    background-color: var(--vscode-scrollbarSlider-background);
-    border-radius: 3px;
     overflow: hidden;
 }
 
-.group-percent {
+.usage-card-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--foreground);
+    white-space: nowrap;
+}
+
+.usage-card-reset {
     font-size: 10px;
+    color: var(--muted-text);
+    white-space: nowrap;
+    opacity: 0.8;
+}
+
+.usage-card-percent {
+    font-size: 11px;
+    font-weight: 700;
     min-width: 32px;
     text-align: right;
+    letter-spacing: -0.2px;
 }
 
-.usage-segment {
+.usage-card-bar-container {
+    height: 5px;
+    background-color: rgba(127, 127, 127, 0.15);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+
+.usage-card-bar-fill {
     height: 100%;
-    transition: width 0.3s;
+    border-radius: 3px;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    background-image: linear-gradient(to right, rgba(255, 255, 255, 0.1), transparent);
+    /* Subtle shine */
 }
 
+/* Details Toggle Row */
 .usage-header-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 12px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-color);
+    padding: 8px 4px 4px 4px;
     cursor: pointer;
+    opacity: 0.8;
+}
+
+.usage-header-row:hover {
+    opacity: 1;
+}
+
+.toggle-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--muted-text);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .toggle-icon {
@@ -421,50 +484,24 @@ body {
     transform: rotate(180deg);
 }
 
+/* Expanded List */
 .usage-list {
-    margin-top: 8px;
+    margin-top: 4px;
     display: none;
     max-height: 250px;
     overflow-y: auto;
+    padding-bottom: 4px;
 }
 
 .usage-list.visible {
     display: block;
 }
 
-.usage-group-row {
-    padding: 8px;
-    margin-bottom: 4px;
-    border-radius: 4px;
-    cursor: pointer;
-    border: 1px solid transparent;
-}
-
-.usage-group-row:hover {
-    background-color: var(--hover-background);
-}
-
-.usage-group-row.selected {
-    background-color: rgba(127, 127, 127, 0.15);
-    border-color: var(--border-color);
-}
-
-.usage-item-row {
-    margin-bottom: 8px;
-    padding: 4px;
-    border-radius: 4px;
-}
-
-.usage-item-header {
+/* Nested model items inside list can share card styles but more compact */
+.model-item-compact {
+    padding: 6px 12px;
     display: flex;
-    justify-content: space-between;
-    margin-bottom: 3px;
-    font-size: 11px;
-}
-
-.usage-item-bar {
-    height: 3px;
-    background-color: var(--vscode-scrollbarSlider-background);
-    border-radius: 2px;
-    overflow: hidden;
+    flex-direction: column;
+    gap: 4px;
+    border-top: 1px solid rgba(127, 127, 127, 0.1);
 }

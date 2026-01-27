@@ -6,6 +6,7 @@
     let projects = [];
     let sessions = {};
     let skills = {};
+    let projectFiles = {};
     let globalSkills = undefined;
 
     let globalSkillsPath = null; // Store global path
@@ -120,8 +121,33 @@
                     }
                 }
 
+                if (message.files) {
+                    projectFiles = message.files;
+                    changed = true;
+                    console.log('[UI][DEBUG] Project files updated');
+                }
 
-                if (message.conversations && message.conversations.length > 0) {
+                if (message.activeProjectPath !== undefined && activeProjectPath !== message.activeProjectPath) {
+                    activeProjectPath = message.activeProjectPath;
+                    changed = true;
+                }
+
+                if (changed) {
+                    console.log('[UI] Scheduling renderProjects due to changes');
+                    debouncedRenderProjects();
+                }
+                break;
+
+            case 'filesUpdate':
+                if (message.projectId && message.files) {
+                    projectFiles[message.projectId] = message.files;
+                    console.log('[UI][DEBUG] Partial files updated for:', message.projectId);
+                    debouncedRenderProjects();
+                }
+                break;
+
+            case 'conversationsUpdate':
+                if (message.conversations) {
                     // Safety merge: Do not lose workspace paths we already know
                     message.conversations.forEach(newC => {
                         const oldC = allConversations.find(oc => oc.id === newC.id);
@@ -132,22 +158,12 @@
 
                     const nextConvs = JSON.stringify(message.conversations.map(c => c.id + (c.workspacePath || '')));
                     const prevConvs = JSON.stringify(allConversations.map(c => c.id + (c.workspacePath || '')));
-                    if (nextConvs !== prevConvs) {
+
+                    if (nextConvs !== prevConvs || allConversations.length === 0) {
                         allConversations = message.conversations;
-                        changed = true;
-                        console.log('[UI] Conversations data changed');
+                        console.log('[UI] Conversations data updated:', allConversations.length);
+                        debouncedRenderProjects();
                     }
-                }
-
-                if (message.activeProjectPath !== undefined && activeProjectPath !== message.activeProjectPath) {
-                    activeProjectPath = message.activeProjectPath;
-                    changed = true;
-                }
-
-                // Only render if something meaningful changed
-                if (changed) {
-                    console.log('[UI] Scheduling renderProjects due to changes');
-                    debouncedRenderProjects();
                 }
                 break;
             case 'usageUpdate':
@@ -220,31 +236,29 @@
         // Find selected group
         const selectedGroup = quotaGroups.find(g => g.id === selectedGroupId) || quotaGroups[0];
 
-        // --- Render Selected Group in Header (Collapsed View) ---
+        // --- Render Selected Group (Active Card) ---
         if (usageGroupsEl) {
             const remaining = Math.min(100, Math.max(0, selectedGroup.remaining));
             const color = getRemainingColor(remaining);
 
             usageGroupsEl.innerHTML = `
-                <div class="usage-group-item active-group">
-                    <div class="group-header">
-                        <span class="group-name">${selectedGroup.name}</span>
-                        <span class="group-reset">${formatDate(selectedGroup.resetDate)}</span>
-                    </div>
-                    <div class="group-bar-row">
-                        <div class="group-bar-container">
-                            <div class="usage-segment" style="width: ${remaining}%; background-color: ${color}"></div>
+                <div class="usage-card">
+                    <div class="usage-card-header">
+                        <div class="usage-card-title-group">
+                            <span class="usage-card-name">${selectedGroup.name}</span>
+                            <span class="usage-card-reset">· Resets ${formatDate(selectedGroup.resetDate)}</span>
                         </div>
-                        <span class="group-percent" style="color: ${color}">${remaining}%</span>
+                        <span class="usage-card-percent" style="color: ${color}">${remaining}%</span>
+                    </div>
+                    <div class="usage-card-bar-container">
+                        <div class="usage-card-bar-fill" style="width: ${remaining}%; background-color: ${color}"></div>
                     </div>
                 </div>
             `;
         }
 
-        // --- Render All Groups in Expandable Details ---
+        // --- Render All Groups & Models in Detail ---
         if (usageListEl) {
-            // Only render details if needed, to avoid wiping selection handlers if re-rendering carelessly
-            // But currently renderUsage is called on update so we must re-render.
             usageListEl.innerHTML = '';
 
             quotaGroups.forEach(group => {
@@ -253,52 +267,49 @@
                 const isSelected = group.id === selectedGroupId;
 
                 const groupEl = document.createElement('div');
-                groupEl.className = 'usage-group-row' + (isSelected ? ' selected' : '');
+                groupEl.className = 'usage-card clickable' + (isSelected ? ' selected' : '');
                 groupEl.innerHTML = `
-                    <div class="group-header">
-                        <span class="group-name">${group.name}</span>
-                        <div style="display:flex; flex-direction:column; align-items:flex-end;">
-                            <span style="color: ${color}">${remaining}%</span>
-                            <span class="group-reset" style="font-size:9px; color:var(--muted-text);">${formatDate(group.resetDate)}</span>
+                    <div class="usage-card-header">
+                        <div class="usage-card-title-group">
+                            <span class="usage-card-name">${group.name}</span>
+                            <span class="usage-card-reset">· Resets ${formatDate(group.resetDate)}</span>
                         </div>
+                        <span class="usage-card-percent" style="color: ${color}">${remaining}%</span>
                     </div>
-                    <div class="group-bar-row">
-                        <div class="group-bar-container">
-                            <div class="usage-segment" style="width: ${remaining}%; background-color: ${color}"></div>
-                        </div>
+                    <div class="usage-card-bar-container">
+                        <div class="usage-card-bar-fill" style="width: ${remaining}%; background-color: ${color}"></div>
                     </div>
                 `;
 
-                // Click to select this group
+                // Add models as nested items inside the group card
+                group.models.forEach(model => {
+                    const modelRemaining = Math.min(100, Math.max(0, model.remaining));
+                    const modelColor = getRemainingColor(modelRemaining);
+
+                    const modelDiv = document.createElement('div');
+                    modelDiv.className = 'model-item-compact';
+                    modelDiv.innerHTML = `
+                        <div class="usage-card-header">
+                            <span class="usage-card-name" style="font-weight:normal; opacity:0.9">${model.name}</span>
+                            <span class="usage-card-percent" style="color: ${modelColor}">${modelRemaining}%</span>
+                        </div>
+                        <div class="usage-card-bar-container" style="height:2px; opacity:0.8">
+                            <div class="usage-card-bar-fill" style="width: ${modelRemaining}%; background-color: ${modelColor}"></div>
+                        </div>
+                    `;
+                    groupEl.appendChild(modelDiv);
+                });
+
+                // Selection handler
                 groupEl.addEventListener('click', () => {
                     selectedGroupId = group.id;
-                    saveState(); // Persist selection
+                    saveState();
                     renderUsage();
-                    // Collapse after selection
                     usageListEl.classList.remove('visible');
                     toggleIcon.classList.remove('expanded');
                 });
 
                 usageListEl.appendChild(groupEl);
-
-                // Show individual models under each group
-                group.models.forEach(model => {
-                    const modelRemaining = Math.min(100, Math.max(0, model.remaining));
-                    const modelColor = getRemainingColor(modelRemaining);
-
-                    const modelEl = document.createElement('div');
-                    modelEl.className = 'usage-item-row';
-                    modelEl.innerHTML = `
-                        <div class="usage-item-header">
-                            <span>${model.name}</span>
-                            <span style="color: ${modelColor}">${modelRemaining}%</span>
-                        </div>
-                        <div class="usage-item-bar">
-                            <div class="usage-segment" style="width: ${modelRemaining}%; background-color: ${modelColor}"></div>
-                        </div>
-                    `;
-                    usageListEl.appendChild(modelEl);
-                });
             });
         }
     }
@@ -810,6 +821,61 @@
                 }
             }
         }
+
+        // --- Files Folder ---
+        const filesContentId = `content-files-${project.id}`;
+        let filesContainer = contentEl.querySelector(`.folder-container[data-type="files"]`);
+
+        if (!filesContainer) {
+            filesContainer = document.createElement('div');
+            filesContainer.className = 'folder-container';
+            filesContainer.setAttribute('data-type', 'files');
+            filesContainer.innerHTML = `
+                <div class="folder-header" data-target="${filesContentId}" data-path="${project.path}" data-type="files">
+                    <span class="folder-arrow">▼</span>
+                    <span>Files</span>
+                </div>
+                <div id="${filesContentId}" class="folder-content"></div>
+            `;
+            contentEl.appendChild(filesContainer);
+        }
+
+        // Update Files State
+        const isFilesExpanded = expandedFolders.has(filesContentId);
+        const filesArrow = filesContainer.querySelector('.folder-arrow');
+        const filesContentDiv = filesContainer.querySelector(`#${filesContentId}`);
+
+        filesArrow.className = 'folder-arrow' + (isFilesExpanded ? '' : ' collapsed');
+        filesContentDiv.className = 'folder-content' + (isFilesExpanded ? '' : ' collapsed');
+
+        // Update Files Content
+        if (isFilesExpanded) {
+            const filesData = projectFiles[project.id];
+            if (filesData && filesData.length > 0) {
+                const newFilesHtml = renderSkills(filesData, project.id, 0); // Reuse tree renderer
+                if (filesContentDiv.innerHTML !== newFilesHtml) {
+                    filesContentDiv.innerHTML = newFilesHtml;
+                    // Re-bind click events for files
+                    filesContentDiv.querySelectorAll('.file-item').forEach(el => {
+                        el.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            const filePath = el.getAttribute('data-path');
+                            if (filePath) {
+                                vscode.postMessage({ type: 'openFile', path: filePath });
+                            }
+                        });
+                    });
+                }
+            } else {
+                // Trigger fetch if empty and expanded
+                if (!filesData) {
+                    vscode.postMessage({ type: 'requestFiles', projectId: project.id, path: project.path });
+                    filesContentDiv.innerHTML = '<div class="folder-empty">Loading project files...</div>';
+                } else {
+                    filesContentDiv.innerHTML = '<div class="folder-empty">No files found</div>';
+                }
+            }
+        }
     }
 
     function renderChatsInner(container, project, allConvos) {
@@ -830,25 +896,21 @@
 
         const projectPathNorm = normalizePath(project.path);
 
+        // STRICTOR FILTERING: Only show chats that explicitly belong to this project
         let projectConvos = allConvos.filter(c => {
             if (!c.workspacePath) return false;
             const convoPathNorm = normalizePath(c.workspacePath);
-            // Use includes for better compatibility with partial paths from backend,
-            // but ensure it's a meaningful match
             return convoPathNorm === projectPathNorm ||
-                convoPathNorm.indexOf(projectPathNorm + '/') !== -1 ||
-                projectPathNorm.indexOf(convoPathNorm) !== -1;
+                convoPathNorm.startsWith(projectPathNorm + '/') ||
+                projectPathNorm.startsWith(convoPathNorm + '/');
         });
 
-        let isFallback = false;
         if (projectConvos.length === 0) {
-            // Fallback: If this is the ACTIVE project, show all recent chats that DON'T belong elsewhere
+            // Fallback: If this is the ACTIVE project, show chats that DON'T have any associated path (orphaned/global chats)
             const isActive = activeProjectPath && (normalizePath(activeProjectPath) === projectPathNorm);
             if (isActive) {
-                // To avoid duplication, we could filter out conversations that are matched by other projects
-                // but for simplicity and speed, we'll just show the latest 5
-                projectConvos = allConvos.slice(0, 5);
-                isFallback = true;
+                // Show orphaned chats (those without workspacePath)
+                projectConvos = allConvos.filter(c => !c.workspacePath);
             }
         }
 
@@ -856,7 +918,6 @@
             container.innerHTML = '<div class="folder-empty">No associated chats</div>';
             return;
         }
-
 
         const limit = 10;
         const currentConvos = projectConvos.slice(0, limit);
@@ -872,7 +933,7 @@
         let html = '';
         currentConvos.forEach(convo => {
             html += `
-                <div class="conversation-item sub-item" data-id="${convo.id}">
+                <div class="conversation-item sub-item" data-id="${convo.id}" data-workspace-path="${convo.workspacePath || ''}">
                     <div style="display:flex; align-items:center; overflow:hidden;">
                         <span class="dot red"></span>
                         <span class="convo-title" title="${convo.title}">${convo.title || 'Untitled'}</span>
@@ -888,10 +949,13 @@
             item.onclick = (e) => {
                 e.stopPropagation();
                 const cid = item.getAttribute('data-id');
+                const chatPath = item.getAttribute('data-workspace-path');
                 vscode.postMessage({
                     type: 'handleChatClick',
                     cascadeId: cid,
-                    projectPath: project.path
+                    // Pass the ACTUAL path of the chat, not the project's own path.
+                    // This allows VS Code to correctly detect if it's across projects.
+                    projectPath: chatPath || undefined
                 });
             };
         });
