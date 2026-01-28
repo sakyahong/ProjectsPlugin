@@ -937,12 +937,6 @@
             // Soft match fallback removed to ensure strict attribution.
             // Previous logic allowed "ProjectA" to match "ProjectA_Backup" which is undesirable.
 
-            if (shouldLog && (c.workspacePath.includes('Ares') || c.workspacePath.includes('Projects'))) {
-                console.log(`   - Check: ${c.title}`);
-                console.log(`     ConvoPath: ${c.workspacePath} -> Norm: ${convoPathNorm}`);
-                console.log(`     Match Result: ${isMatch} (Strict: ${convoPathNorm === projectPathNorm}, Child: ${convoPathNorm.startsWith(projectPathNorm + '/')})`);
-            }
-
             return isMatch;
             // 注意：移除了 projectPathNorm.startsWith(convoPathNorm + '/')
             // 这个条件会导致父目录的 chats 也显示在子目录项目中
