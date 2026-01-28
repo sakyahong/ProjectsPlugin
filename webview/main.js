@@ -603,7 +603,28 @@
         });
 
         // 2. Update or Create projects
-        projects.forEach((project, index) => {
+        // 排序逻辑：先按拼音排序，活跃项目置顶
+        const sortedProjects = [...projects].sort((a, b) => {
+            // 先按拼音排序
+            return a.name.localeCompare(b.name, 'zh-Hans', { sensitivity: 'base' });
+        });
+
+        // 将活跃项目移到第一位
+        if (activeProjectPath) {
+            const normActive = activeProjectPath.toLowerCase();
+            const activeIndex = sortedProjects.findIndex(p => {
+                const normProject = p.path.toLowerCase();
+                return normActive === normProject ||
+                    normActive.startsWith(normProject + '/') ||
+                    normActive.startsWith(normProject + '\\');
+            });
+            if (activeIndex > 0) {
+                const [activeProject] = sortedProjects.splice(activeIndex, 1);
+                sortedProjects.unshift(activeProject);
+            }
+        }
+
+        sortedProjects.forEach((project, index) => {
             let projectEl = projectListEl.querySelector(`.project-item[data-container-id="${project.id}"]`);
 
             if (projectEl) {
@@ -896,23 +917,39 @@
 
         const projectPathNorm = normalizePath(project.path);
 
-        // STRICTOR FILTERING: Only show chats that explicitly belong to this project
+        // Debug first project to reduce noise, or specific projects
+        const shouldLog = projects.indexOf(project) === 0 || project.path.includes('Ares') || project.path.includes('Projects');
+        if (shouldLog) {
+            console.log(`[UI][Match] Project: ${project.path} (Norm: ${projectPathNorm})`);
+        }
+
+        // 严格路径匹配：只显示精确属于此项目的 chats
+        // 规则：chat 的 workspacePath 必须等于或在项目路径内
         let projectConvos = allConvos.filter(c => {
-            if (!c.workspacePath) return false;
+            if (!c.workspacePath) {
+                if (shouldLog) console.log(`   [SKIP] ${c.title}: No workspacePath`);
+                return false;
+            }
             const convoPathNorm = normalizePath(c.workspacePath);
-            return convoPathNorm === projectPathNorm ||
-                convoPathNorm.startsWith(projectPathNorm + '/') ||
-                projectPathNorm.startsWith(convoPathNorm + '/');
+            // 精确匹配或 chat 在项目目录内
+            let isMatch = convoPathNorm === projectPathNorm || convoPathNorm.startsWith(projectPathNorm + '/');
+
+            // Soft match fallback removed to ensure strict attribution.
+            // Previous logic allowed "ProjectA" to match "ProjectA_Backup" which is undesirable.
+
+            if (shouldLog && (c.workspacePath.includes('Ares') || c.workspacePath.includes('Projects'))) {
+                console.log(`   - Check: ${c.title}`);
+                console.log(`     ConvoPath: ${c.workspacePath} -> Norm: ${convoPathNorm}`);
+                console.log(`     Match Result: ${isMatch} (Strict: ${convoPathNorm === projectPathNorm}, Child: ${convoPathNorm.startsWith(projectPathNorm + '/')})`);
+            }
+
+            return isMatch;
+            // 注意：移除了 projectPathNorm.startsWith(convoPathNorm + '/')
+            // 这个条件会导致父目录的 chats 也显示在子目录项目中
         });
 
-        if (projectConvos.length === 0) {
-            // Fallback: If this is the ACTIVE project, show chats that DON'T have any associated path (orphaned/global chats)
-            const isActive = activeProjectPath && (normalizePath(activeProjectPath) === projectPathNorm);
-            if (isActive) {
-                // Show orphaned chats (those without workspacePath)
-                projectConvos = allConvos.filter(c => !c.workspacePath);
-            }
-        }
+        // 严格路径匹配：不再添加孤儿对话
+        // 每个项目只显示 workspacePath 精确匹配或在项目目录内的对话
 
         if (projectConvos.length === 0) {
             container.innerHTML = '<div class="folder-empty">No associated chats</div>';

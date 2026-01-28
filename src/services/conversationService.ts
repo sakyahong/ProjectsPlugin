@@ -188,25 +188,52 @@ export class ConversationService {
             const checkLimit = Math.min(stepsResponse.steps.length, 5);
             const jsonStr = JSON.stringify(stepsResponse.steps.slice(0, checkLimit));
 
-            // Regex to capture deep paths: /Users/user/.../...
-            // Find all matches to select the best one
-            const matches = [...jsonStr.matchAll(/(?:file:\/\/)?(\/Users\/[-\w.+]+(?:\/[-\w.+ ]+)+)/g)];
+            // Regex to capture absolute paths: /Users/..., /Volumes/..., etc.
+            // Use a broader character set for path segments to handle special chars, spaces, usage of % for encoded paths, etc.
+            // Exclude & and other special control characters to prevent matching URL parameters or complex strings
+            const matches = [...jsonStr.matchAll(/(?:file:\/\/)?(\/(?:Users|Volumes|home|opt|var)\/(?:[^\\/:"*?<>|\r\n&]+\/)*[^\\/:"*?<>|\r\n&]+)/g)];
+
+            console.log(`[Heuristic] Found ${matches.length} path matches in steps`);
+            if (matches.length === 0) {
+                // Debug: why are we missing paths?
+                console.log(`[Heuristic] NO MATCHES. JSON sample: ${jsonStr.slice(0, 300)}...`);
+            }
 
             for (const m of matches) {
-                const path = m[1] || m[0];
+                let pathStr = m[1] || m[0];
+
+                // Decode URI components if it looks encoded (e.g. %20)
+                try {
+                    if (pathStr.includes('%')) {
+                        pathStr = decodeURIComponent(pathStr);
+                    }
+                } catch (e) {
+                    // ignore decoding errors
+                }
+
                 // Filter out system and build paths that confuse association
-                if (path.includes('.gemini') ||
-                    path.includes('Library/Application Support') ||
-                    path.includes('Library/Developer') || // Xcode DerivedData
-                    path.includes('DerivedData') ||
-                    path.includes('/var/folders') ||
-                    path.includes('.vscode/extensions')) {
+                if (pathStr.includes('.gemini') ||
+                    pathStr.includes('Library/Application Support') ||
+                    pathStr.includes('Library/Developer') || // Xcode DerivedData
+                    pathStr.includes('DerivedData') ||
+                    pathStr.includes('/var/folders') ||
+                    pathStr.includes('.vscode/extensions') ||
+                    pathStr.includes('/node_modules/') ||
+                    pathStr.includes('/.git/')) {
                     continue;
                 }
 
                 // Found a likely project source path
-                // console.log(`[Heuristic] Found good path: ${path}`);
-                return decodeURIComponent(path);
+                // Use extractRootPath to get project root instead of file path
+                // Ensure we add file:// schema for extractRootPath validation if needed,
+                // but extractRootPath handles raw strings mostly.
+                const projectRoot = this.extractRootPath('file://' + pathStr);
+
+                // Additional check: project root should not contain &
+                if (projectRoot && projectRoot.length > 1 && !projectRoot.includes('&')) {
+                    console.log(`[PathExtract] Found file: ${pathStr} → Project: ${projectRoot}`);
+                    return projectRoot;
+                }
             }
         } catch (e) {
             // ignore
@@ -217,16 +244,65 @@ export class ConversationService {
 
     private extractRootPath(fileUri: string): string {
         if (!fileUri) return '';
-        // Convert file URI to path and try to find project root (heuristic)
-        // Simple heuristic: return the directory containing the file
-        // Ideally we'd look for a common project root, but for now just getting a path is good
-        // Remove file:// prefix
-        let path = fileUri.replace(/^file:\/\//, '');
-        // Decode URI components
-        path = decodeURIComponent(path);
 
-        // Return folder path (remove filename)
-        return path.substring(0, path.lastIndexOf('/'));
+        // Convert file URI to path
+        let filePath = fileUri.replace(/^file:\/\//, '');
+        filePath = decodeURIComponent(filePath);
+
+        // 智能推断项目根目录
+        const parts = filePath.split('/').filter(p => p);
+
+        // 检测是否是纯目录路径(不是文件)
+        const lastPart = parts[parts.length - 1];
+        const isFile = lastPart && lastPart.includes('.');
+
+        // 如果是文件路径,需要移除文件名
+        // 如果是目录路径,直接使用
+        const dirParts = isFile ? parts.slice(0, -1) : parts;
+
+        // 根据路径模式推断项目根目录
+        // 关键:用户主目录下通常是 /Users/username/SomeFolder/ProjectName
+        // 外部磁盘通常是 /Volumes/DiskName/SomeFolder/SomeFolder/ProjectName
+
+        if (dirParts[0] === 'Users' && dirParts.length >= 4) {
+            // macOS 用户目录: /Users/username/folder/project/...
+            // 项目根目录在第4层 (Downloads/Ares, Documents/MyProject, etc.)
+            return '/' + dirParts.slice(0, 4).join('/');
+        }
+
+        if (dirParts[0] === 'Users' && dirParts.length === 3) {
+            // macOS 用户目录但只有3层: /Users/username/project
+            return '/' + dirParts.slice(0, 3).join('/');
+        }
+
+        if (dirParts[0] === 'Volumes' && dirParts.length >= 5) {
+            // macOS 外部磁盘: /Volumes/DiskName/Folder/Folder/ProjectName/...
+            // 项目根目录在第5层
+            return '/' + dirParts.slice(0, 5).join('/');
+        }
+
+        if (dirParts[0] === 'Volumes' && dirParts.length === 4) {
+            // macOS 外部磁盘但只有4层
+            return '/' + dirParts.slice(0, 4).join('/');
+        }
+
+        if (dirParts[0] === 'home' && dirParts.length >= 4) {
+            // Linux 用户目录: /home/username/folder/project/...
+            return '/' + dirParts.slice(0, 4).join('/');
+        }
+
+        if (dirParts[0] === 'home' && dirParts.length === 3) {
+            // Linux 用户目录但只有3层
+            return '/' + dirParts.slice(0, 3).join('/');
+        }
+
+        // Fallback: 返回目录路径本身(如果足够短)或截取前几层
+        if (dirParts.length <= 4) {
+            return '/' + dirParts.join('/');
+        }
+
+        // 最终 fallback: 返回前4层
+        return '/' + dirParts.slice(0, 4).join('/');
     }
 
     // Process API response into Conversation array
@@ -292,10 +368,39 @@ export class ConversationService {
         return conversations.filter(c => {
             if (!c.workspacePath) return false;
             // Normalize paths for comparison
-            const normalizedConvoPath = c.workspacePath.replace(/^file:\/\//, '').toLowerCase();
-            const normalizedWorkspacePath = workspacePath.toLowerCase();
-            return normalizedConvoPath.includes(normalizedWorkspacePath) ||
-                normalizedWorkspacePath.includes(normalizedConvoPath);
+            const normalizePath = (p: string) => {
+                if (!p) return '';
+                try {
+                    return decodeURIComponent(p.replace(/^file:\/\//, ''))
+                        .replace(/\\/g, '/')
+                        .replace(/\/$/, '')
+                        .toLowerCase();
+                } catch (e) {
+                    return p.replace(/^file:\/\//, '').toLowerCase();
+                }
+            };
+
+            const normalizedConvoPath = normalizePath(c.workspacePath);
+            const normalizedWorkspacePath = normalizePath(workspacePath);
+
+            // STRICT MATCHING
+            // 1. Exact match
+            if (normalizedConvoPath === normalizedWorkspacePath) return true;
+
+            // 2. Child directory match (Convo is inside Workspace)
+            // MUST end with / or be exact match to avoid partial name matching (e.g. Project1 vs Project10)
+            if (normalizedWorkspacePath.startsWith(normalizedConvoPath + '/') ||
+                normalizedWorkspacePath.startsWith(normalizedConvoPath + '\\')) {
+                return true;
+            }
+
+            // 3. Parent directory match (Workspace is inside Convo - less likely but possible if we open subfolder)
+            if (normalizedConvoPath.startsWith(normalizedWorkspacePath + '/') ||
+                normalizedConvoPath.startsWith(normalizedWorkspacePath + '\\')) {
+                return true;
+            }
+
+            return false;
         });
     }
 }
