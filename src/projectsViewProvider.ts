@@ -676,26 +676,47 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 partial: true
             });
 
-            // --- PHASE 2: Incremental Detail Loading ---
+            // TRIGGER ASYNC LOAD EARLY (Parallel with Phase 2)
+            // Do not wait for project details to load before fetching chats/quota
+            this.triggerAsyncLoad();
+
+            // --- PHASE 2: Parallelized Detail Loading ---
             (async () => {
                 const projectSessions: { [key: string]: Session[] } = {};
                 const projectSkills: { [key: string]: any[] } = {};
                 const projectFiles: { [key: string]: any[] } = {};
 
-                for (const project of projects) {
+                // 1. Define Global Skills Fetch logic
+                const globalSkillsPath = path.join(os.homedir(), '.gemini/antigravity/global_skills');
+                const fetchGlobalSkills = async () => {
+                    if (!fs.existsSync(globalSkillsPath)) {
+                        try { fs.mkdirSync(globalSkillsPath, { recursive: true }); } catch (err) { }
+                    }
+                    if (fs.existsSync(globalSkillsPath)) {
+                        try {
+                            return await this.skillService.getSkillsFromPath(globalSkillsPath);
+                        } catch (e) { return []; }
+                    }
+                    return [];
+                };
+                const globalSkillsPromise = fetchGlobalSkills();
+
+                // 2. Define Project Fetch logic (Concurrent per project)
+                const fetchProjectData = async (project: Project) => {
                     try {
                         const normPath = this.normalizePath(project.path);
-                        const sessions = await this.sessionParser.getSessionsForProject(normPath);
-                        projectSessions[project.id] = sessions.slice(0, 3);
+                        // Inner parallel fetch for independent data sources
+                        const [sessions, skills, files] = await Promise.all([
+                            this.sessionParser.getSessionsForProject(normPath).then(s => s.slice(0, 3)),
+                            this.skillService.getSkillsForProject(normPath),
+                            this.skillService.getSkillsFromPath(normPath)
+                        ]);
 
-                        const skills = await this.skillService.getSkillsForProject(normPath);
+                        projectSessions[project.id] = sessions;
                         projectSkills[project.id] = skills;
-
-                        // NEW: Fetch files for sync
-                        const files = await this.skillService.getSkillsFromPath(normPath);
                         projectFiles[project.id] = files;
 
-                        // Push partial updates for each project
+                        // Immediate partial update for this project
                         this._view?.webview.postMessage({
                             type: 'update',
                             projects: projects,
@@ -708,20 +729,16 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     } catch (error) {
                         console.error(`Failed to load data for project ${project.name}:`, error);
                     }
-                }
+                };
 
-                // Global Skills last
-                const globalSkillsPath = path.join(os.homedir(), '.gemini/antigravity/global_skills');
-                if (!fs.existsSync(globalSkillsPath)) {
-                    try { fs.mkdirSync(globalSkillsPath, { recursive: true }); } catch (err) { }
-                }
+                // 3. Execute all concurrently
+                await Promise.all([
+                    ...projects.map(p => fetchProjectData(p)),
+                    globalSkillsPromise
+                ]);
 
-                let globalSkills: any[] = [];
-                try {
-                    if (fs.existsSync(globalSkillsPath)) {
-                        globalSkills = await this.skillService.getSkillsFromPath(globalSkillsPath);
-                    }
-                } catch (err) { }
+                // 4. Final Update (All settled)
+                const globalSkills = await globalSkillsPromise;
 
                 this._view?.webview.postMessage({
                     type: 'update',
@@ -734,9 +751,6 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     activeProjectPath: activeProjectPath
                 });
             })();
-
-            // Trigger async updates (Conversations & Quota)
-            setTimeout(() => this.triggerAsyncLoad(), 0);
         }
     }
 
