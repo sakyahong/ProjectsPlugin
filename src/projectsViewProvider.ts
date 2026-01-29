@@ -448,10 +448,9 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 groups: uiGroups
             });
         } catch (error: any) {
-            this._view.webview.postMessage({
-                type: 'usageUpdate',
-                groups: []
-            });
+            // Do NOT send empty groups on error.
+            // Better to show stale data than nothing.
+
             // Suppress initialization error as it's transient
             if (error.message && error.message.includes('LanguageServerClient must be initialized first')) {
                 return;
@@ -681,14 +680,20 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             (async () => {
                 const projectSessions: { [key: string]: Session[] } = {};
                 const projectSkills: { [key: string]: any[] } = {};
+                const projectFiles: { [key: string]: any[] } = {};
 
                 for (const project of projects) {
                     try {
                         const normPath = this.normalizePath(project.path);
                         const sessions = await this.sessionParser.getSessionsForProject(normPath);
                         projectSessions[project.id] = sessions.slice(0, 3);
+
                         const skills = await this.skillService.getSkillsForProject(normPath);
                         projectSkills[project.id] = skills;
+
+                        // NEW: Fetch files for sync
+                        const files = await this.skillService.getSkillsFromPath(normPath);
+                        projectFiles[project.id] = files;
 
                         // Push partial updates for each project
                         this._view?.webview.postMessage({
@@ -696,6 +701,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                             projects: projects,
                             sessions: projectSessions,
                             skills: projectSkills,
+                            files: projectFiles,
                             activeProjectPath: activeProjectPath,
                             partial: true
                         });
@@ -722,6 +728,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     projects: projects,
                     sessions: projectSessions,
                     skills: projectSkills,
+                    files: projectFiles,
                     globalSkills: globalSkills,
                     globalSkillsPath: globalSkillsPath,
                     activeProjectPath: activeProjectPath

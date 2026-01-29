@@ -17,6 +17,9 @@ export interface GroupedQuota {
 }
 
 export class QuotaService {
+    private lastQuota: any = null;
+    private lastFetchTime: number = 0;
+
     constructor() { }
 
     async getUserStatus(port: number, csrfToken: string, retries = 3): Promise<any> {
@@ -51,10 +54,18 @@ export class QuotaService {
                     res.on('end', () => {
                         if (res.statusCode === 200) {
                             try {
-                                resolve(JSON.parse(responseData));
+                                const parsed = JSON.parse(responseData);
+                                // Cache success response
+                                this.lastQuota = parsed;
+                                this.lastFetchTime = Date.now();
+                                resolve(parsed);
                             } catch (e) {
                                 if (remaining > 0) {
                                     setTimeout(() => attempt(remaining - 1), 1000);
+                                } else if (this.lastQuota) {
+                                    // Fallback to cache
+                                    console.warn('Quota parsing failed, returning cached data');
+                                    resolve(this.lastQuota);
                                 } else {
                                     reject(new Error('Failed to parse response'));
                                 }
@@ -62,6 +73,9 @@ export class QuotaService {
                         } else {
                             if (remaining > 0) {
                                 setTimeout(() => attempt(remaining - 1), 1000);
+                            } else if (this.lastQuota) {
+                                console.warn(`Quota API failed (${res.statusCode}), returning cached data`);
+                                resolve(this.lastQuota);
                             } else {
                                 reject(new Error(`API failed with status ${res.statusCode}`));
                             }
@@ -72,6 +86,9 @@ export class QuotaService {
                 req.on('error', error => {
                     if (remaining > 0) {
                         setTimeout(() => attempt(remaining - 1), 1000);
+                    } else if (this.lastQuota) {
+                        console.warn('Quota connection error, returning cached data');
+                        resolve(this.lastQuota);
                     } else {
                         reject(error);
                     }
@@ -81,6 +98,9 @@ export class QuotaService {
                     req.destroy();
                     if (remaining > 0) {
                         attempt(remaining - 1);
+                    } else if (this.lastQuota) {
+                        console.warn('Quota timeout, returning cached data');
+                        resolve(this.lastQuota);
                     } else {
                         reject(new Error('API request timed out'));
                     }
