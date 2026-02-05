@@ -791,11 +791,8 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                                     <!-- Injected by JS -->
                                 </div>
 
-                                <!-- Expandable List for Details -->
-                                <div class="usage-header-row" id="usage-header-row" title="Click to expand">
-                                    <span class="toggle-label">Details</span>
-                                    <div class="toggle-icon" id="toggle-icon">▼</div>
-                                </div>
+
+                                <!-- Expandable List for Details (toggled by clicking cards) -->
                                 <div class="usage-list" id="usage-list">
                                     <!-- Injected by JS -->
                                 </div>

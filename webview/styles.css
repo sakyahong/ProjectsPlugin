@@ -6,13 +6,23 @@
     --border-color: var(--vscode-widget-border);
     --header-bg: var(--vscode-sideBarSectionHeader-background);
 
-    /* Traditional Japanese Colors */
-    --color-safe: #006E54;
-    /* Moegi */
-    --color-warning: #F8B500;
-    /* Yamabuki */
-    --color-danger: #CB4042;
-    /* Akabeni */
+    /* Vibrant Colors for Progress Bars */
+    --color-ready: #22c55e;
+    --color-warning: #f59e0b;
+    --color-danger: #ef4444;
+
+    /* Usage Card Default Variables */
+    --usage-card-bg: #3a3f47;
+    --usage-card-text: #ffffff;
+    --usage-card-subtitle: #9ca3af;
+    --usage-bar-bg: #4b5563;
+}
+
+body.vscode-light {
+    --usage-card-bg: #f3f3f3;
+    --usage-card-text: #333333;
+    --usage-card-subtitle: #666666;
+    --usage-bar-bg: #dddddd;
 }
 
 * {
@@ -345,10 +355,9 @@ body {
     object-fit: contain;
 }
 
-/* Usage Display (Footer) */
-/* Usage Display (Footer) */
+/* Usage Display (Footer) - Modern Agent Card Style */
 .footer {
-    padding: 12px;
+    padding: 8px 12px;
     border-top: 1px solid var(--border-color);
     background-color: transparent;
 }
@@ -358,98 +367,166 @@ body {
     flex-direction: column;
 }
 
-/* Master Container Card */
+/* Master Container */
 .usage-container-card {
-    background-color: var(--header-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
 }
 
 .usage-groups {
     display: flex;
     flex-direction: column;
+    gap: 6px;
 }
 
-/* Embedded Item Card */
+/* Agent Card Style - Compact */
 .usage-card {
-    background-color: rgba(127, 127, 127, 0.08);
-    /* Slightly distinct from master card */
-    border: 1px solid rgba(127, 127, 127, 0.05);
-    border-radius: 8px;
-    padding: 10px 12px;
+    background-color: var(--usage-card-bg, #3a3f47);
+    border-radius: 10px;
+    padding: 8px 10px;
     display: flex;
-    flex-direction: column;
-    gap: 6px;
+    align-items: center;
+    gap: 8px;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
 }
 
 .usage-card.clickable:hover {
-    background-color: var(--hover-background);
+    background-color: var(--usage-hover-bg, #454b55);
     cursor: pointer;
     transform: translateY(-1px);
 }
 
+body.vscode-light .usage-card.clickable:hover {
+    --usage-hover-bg: #e8e8e8;
+}
+
 .usage-card.selected {
-    border-color: var(--vscode-focusBorder);
-    background-color: rgba(127, 127, 127, 0.12);
+    box-shadow: 0 0 0 1px var(--vscode-focusBorder), 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Left Icon - Compact */
+.usage-card-icon {
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    border-radius: 6px;
+    background-color: #2a2e35;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+}
+
+/* Middle Content - Compact */
+.usage-card-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    max-width: 90px;
+    overflow: hidden;
 }
 
 .usage-card-header {
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 4px;
-}
-
-.usage-card-title-group {
-    display: flex;
-    align-items: baseline;
-    gap: 4px;
-    flex: 1;
-    overflow: hidden;
+    align-items: center;
+    gap: 6px;
 }
 
 .usage-card-name {
     font-size: 11px;
-    font-weight: 700;
-    color: var(--foreground);
+    font-weight: 600;
+    color: var(--usage-card-text, #fff);
     white-space: nowrap;
 }
 
-.usage-card-reset {
-    font-size: 10px;
-    color: var(--muted-text);
+/* Status Badge */
+.usage-card-status {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
     white-space: nowrap;
-    opacity: 0.8;
+}
+
+.usage-card-status.ready {
+    background-color: #10b981;
+    color: #fff;
+}
+
+.usage-card-status.warning {
+    background-color: #f59e0b;
+    color: #000;
+}
+
+.usage-card-status.danger {
+    background-color: #6b7280;
+    color: #fff;
+}
+
+.usage-card-subtitle {
+    font-size: 9px;
+    color: var(--usage-card-subtitle, #9ca3af);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Right Progress Section - Compact */
+.usage-card-progress {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+}
+
+/* Vertical Bars Progress - Compact */
+.usage-bars {
+    display: flex;
+    gap: 2px;
+    align-items: flex-end;
+    height: 14px;
+}
+
+.usage-bar {
+    width: 3px;
+    height: 14px;
+    border-radius: 1px;
+    background-color: var(--usage-bar-bg, #4b5563);
+    transition: background-color 0.3s;
+}
+
+.usage-bar.filled {
+    background-color: currentColor;
 }
 
 .usage-card-percent {
-    font-size: 11px;
-    font-weight: 700;
-    min-width: 32px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--usage-card-subtitle, #9ca3af);
+    min-width: 28px;
     text-align: right;
-    letter-spacing: -0.2px;
+}
+
+/* Reset Date - Hidden in main card, shown in details */
+.usage-card-reset {
+    display: none;
+}
+
+/* Legacy compatibility */
+.usage-card-title-group {
+    display: none;
 }
 
 .usage-card-bar-container {
-    height: 5px;
-    background-color: rgba(127, 127, 127, 0.15);
-    border-radius: 3px;
-    overflow: hidden;
-    position: relative;
+    display: none;
 }
 
 .usage-card-bar-fill {
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    background-image: linear-gradient(to right, rgba(255, 255, 255, 0.1), transparent);
-    /* Subtle shine */
+    display: none;
 }
 
 /* Details Toggle Row */
@@ -488,20 +565,49 @@ body {
 .usage-list {
     margin-top: 4px;
     display: none;
-    max-height: 250px;
+    max-height: 350px;
     overflow-y: auto;
     padding-bottom: 4px;
 }
 
 .usage-list.visible {
-    display: block;
-}
-
-/* Nested model items inside list can share card styles but more compact */
-.model-item-compact {
-    padding: 6px 12px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    border-top: 1px solid rgba(127, 127, 127, 0.1);
+    gap: 8px;
+}
+
+/* Nested model items */
+.model-item-compact {
+    background-color: #2a2e35;
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.model-item-compact .usage-card-header {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.model-item-compact .usage-card-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: #d1d5db;
+}
+
+.model-item-compact .usage-card-percent {
+    font-size: 12px;
+}
+
+.model-item-compact .usage-bars {
+    height: 14px;
+}
+
+.model-item-compact .usage-bar {
+    width: 3px;
+    height: 14px;
 }

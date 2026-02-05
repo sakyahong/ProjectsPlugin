@@ -211,7 +211,7 @@
     vscode.postMessage({ type: 'onLoad' });
 
     function getRemainingColor(remaining) {
-        if (remaining >= 60) return 'var(--color-safe)';      // Green >= 60%
+        if (remaining >= 60) return 'var(--color-ready)';     // Green >= 60%
         if (remaining >= 30) return 'var(--color-warning)';   // Orange 30-60%
         return 'var(--color-danger)';                         // Red < 30%
     }
@@ -230,59 +230,91 @@
         }
     }
 
+    // Helper: Get icon and background color for group
+    function getGroupStyle(groupId) {
+        const styles = {
+            'gemini-pro': { icon: '✦', bg: '#1a1a2e', iconColor: '#fff' },
+            'gemini-flash': { icon: '✦', bg: '#2d2d3a', iconColor: '#ffd700' },
+            'claude': { icon: '✷', bg: '#d97757', iconColor: '#fff' },
+            'gpt': { icon: '⬢', bg: '#10a37f', iconColor: '#fff' },
+            'other': { icon: '◈', bg: '#4b5563', iconColor: '#fff' }
+        };
+        return styles[groupId] || styles['other'];
+    }
+
+    // Helper: Get status based on remaining percentage
+    function getStatus(remaining) {
+        if (remaining >= 60) return { text: 'Ready', class: 'ready' };
+        if (remaining >= 30) return { text: 'In Progress', class: 'warning' };
+        return { text: 'Break', class: 'danger' };
+    }
+
+    // Helper: Generate vertical bars HTML
+    function generateBars(remaining, color) {
+        const totalBars = 10;
+        const filledBars = Math.round(remaining / 10);
+        let barsHtml = '';
+        for (let i = 0; i < totalBars; i++) {
+            const filled = i < filledBars ? 'filled' : '';
+            barsHtml += `<div class="usage-bar ${filled}" style="color: ${color}"></div>`;
+        }
+        return barsHtml;
+    }
+
     function renderUsage() {
         if (!quotaGroups || quotaGroups.length === 0) return;
 
-        // Find selected group
-        const selectedGroup = quotaGroups.find(g => g.id === selectedGroupId) || quotaGroups[0];
-
-        // --- Render Selected Group (Active Card) ---
+        // --- Render All Groups as Cards ---
         if (usageGroupsEl) {
-            const remaining = Math.min(100, Math.max(0, selectedGroup.remaining));
-            const color = getRemainingColor(remaining);
-
-            usageGroupsEl.innerHTML = `
-                <div class="usage-card">
-                    <div class="usage-card-header">
-                        <div class="usage-card-title-group">
-                            <span class="usage-card-name">${selectedGroup.name}</span>
-                            <span class="usage-card-reset">· Resets ${formatDate(selectedGroup.resetDate)}</span>
-                        </div>
-                        <span class="usage-card-percent" style="color: ${color}">${remaining}%</span>
-                    </div>
-                    <div class="usage-card-bar-container">
-                        <div class="usage-card-bar-fill" style="width: ${remaining}%; background-color: ${color}"></div>
-                    </div>
-                </div>
-            `;
-        }
-
-        // --- Render All Groups & Models in Detail ---
-        if (usageListEl) {
-            usageListEl.innerHTML = '';
+            usageGroupsEl.innerHTML = '';
 
             quotaGroups.forEach(group => {
                 const remaining = Math.min(100, Math.max(0, group.remaining));
                 const color = getRemainingColor(remaining);
+                const style = getGroupStyle(group.id);
                 const isSelected = group.id === selectedGroupId;
 
-                const groupEl = document.createElement('div');
-                groupEl.className = 'usage-card clickable' + (isSelected ? ' selected' : '');
-                groupEl.innerHTML = `
-                    <div class="usage-card-header">
-                        <div class="usage-card-title-group">
-                            <span class="usage-card-name">${group.name}</span>
-                            <span class="usage-card-reset">· Resets ${formatDate(group.resetDate)}</span>
-                        </div>
-                        <span class="usage-card-percent" style="color: ${color}">${remaining}%</span>
+                const cardEl = document.createElement('div');
+                cardEl.className = 'usage-card clickable' + (isSelected ? ' selected' : '');
+                cardEl.innerHTML = `
+                    <div class="usage-card-icon" style="background-color: ${style.bg}; color: ${style.iconColor}">${style.icon}</div>
+                    <div class="usage-card-content">
+                        <span class="usage-card-name">${group.name}</span>
+                        <span class="usage-card-subtitle">${formatDate(group.resetDate)}</span>
                     </div>
-                    <div class="usage-card-bar-container">
-                        <div class="usage-card-bar-fill" style="width: ${remaining}%; background-color: ${color}"></div>
+                    <div class="usage-card-progress">
+                        <div class="usage-bars" style="color: ${color}">
+                            ${generateBars(remaining, color)}
+                        </div>
+                        <span class="usage-card-percent">${remaining}%</span>
                     </div>
                 `;
 
-                // Add models as nested items inside the group card
-                group.models.forEach(model => {
+                // Click to select and toggle details
+                cardEl.addEventListener('click', () => {
+                    const wasSelected = selectedGroupId === group.id;
+                    selectedGroupId = group.id;
+                    saveState();
+                    renderUsage();
+                    // If clicking same card, toggle; if different card, always show
+                    if (wasSelected) {
+                        usageListEl.classList.toggle('visible');
+                    } else {
+                        usageListEl.classList.add('visible');
+                    }
+                });
+
+                usageGroupsEl.appendChild(cardEl);
+            });
+        }
+
+        // --- Render Selected Group's Models in Detail ---
+        if (usageListEl) {
+            usageListEl.innerHTML = '';
+            const selectedGroup = quotaGroups.find(g => g.id === selectedGroupId) || quotaGroups[0];
+
+            if (selectedGroup && selectedGroup.models) {
+                selectedGroup.models.forEach(model => {
                     const modelRemaining = Math.min(100, Math.max(0, model.remaining));
                     const modelColor = getRemainingColor(modelRemaining);
 
@@ -290,27 +322,18 @@
                     modelDiv.className = 'model-item-compact';
                     modelDiv.innerHTML = `
                         <div class="usage-card-header">
-                            <span class="usage-card-name" style="font-weight:normal; opacity:0.9">${model.name}</span>
-                            <span class="usage-card-percent" style="color: ${modelColor}">${modelRemaining}%</span>
+                            <span class="usage-card-name">${model.name}</span>
                         </div>
-                        <div class="usage-card-bar-container" style="height:2px; opacity:0.8">
-                            <div class="usage-card-bar-fill" style="width: ${modelRemaining}%; background-color: ${modelColor}"></div>
+                        <div class="usage-card-progress">
+                            <div class="usage-bars" style="color: ${modelColor}">
+                                ${generateBars(modelRemaining, modelColor)}
+                            </div>
+                            <span class="usage-card-percent">${modelRemaining}%</span>
                         </div>
                     `;
-                    groupEl.appendChild(modelDiv);
+                    usageListEl.appendChild(modelDiv);
                 });
-
-                // Selection handler
-                groupEl.addEventListener('click', () => {
-                    selectedGroupId = group.id;
-                    saveState();
-                    renderUsage();
-                    usageListEl.classList.remove('visible');
-                    toggleIcon.classList.remove('expanded');
-                });
-
-                usageListEl.appendChild(groupEl);
-            });
+            }
         }
     }
 
