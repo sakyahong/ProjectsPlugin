@@ -40,25 +40,38 @@
         return `${prefix}-${Math.abs(hash)}`;
     }
 
+    // Convert any string to a safe CSS ID (for use in querySelector)
+    function safeId(str) {
+        if (!str) return 'unknown';
+        // Use hash-based ID to avoid CSS selector issues with special characters
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash |= 0;
+        }
+        return 'id-' + Math.abs(hash).toString(36);
+    }
+
+
     // Event Delegation for Folders
     // This block will be initialized after elements are defined.
     // Elements
     const projectListEl = document.getElementById('project-list');
     const conversationsListEl = document.getElementById('conversations-list');
     const usageGroupsEl = document.getElementById('usage-groups');
-    const usageListEl = document.getElementById('usage-list');
     const usageHeaderRow = document.getElementById('usage-header-row');
     const toggleIcon = document.getElementById('toggle-icon');
 
     // Toggle Expand
     if (usageHeaderRow) {
         usageHeaderRow.addEventListener('click', () => {
-            const isVisible = usageListEl.classList.contains('visible');
+            const isVisible = usageGroupsEl.classList.contains('visible');
             if (isVisible) {
-                usageListEl.classList.remove('visible');
+                usageGroupsEl.classList.remove('visible');
                 toggleIcon.classList.remove('expanded');
             } else {
-                usageListEl.classList.add('visible');
+                usageGroupsEl.classList.add('visible');
                 toggleIcon.classList.add('expanded');
             }
         });
@@ -292,48 +305,43 @@
 
                 // Click to select and toggle details
                 cardEl.addEventListener('click', () => {
-                    const wasSelected = selectedGroupId === group.id;
-                    selectedGroupId = group.id;
+                    if (selectedGroupId === group.id) {
+                        selectedGroupId = null; // Toggle off
+                    } else {
+                        selectedGroupId = group.id; // Switch to this group
+                    }
                     saveState();
                     renderUsage();
-                    // If clicking same card, toggle; if different card, always show
-                    if (wasSelected) {
-                        usageListEl.classList.toggle('visible');
-                    } else {
-                        usageListEl.classList.add('visible');
-                    }
                 });
 
                 usageGroupsEl.appendChild(cardEl);
-            });
-        }
 
-        // --- Render Selected Group's Models in Detail ---
-        if (usageListEl) {
-            usageListEl.innerHTML = '';
-            const selectedGroup = quotaGroups.find(g => g.id === selectedGroupId) || quotaGroups[0];
+                // If selected, render details directly BELOW this card
+                if (isSelected && group.models) {
+                    const detailsContainer = document.createElement('div');
+                    detailsContainer.className = 'usage-list visible';
+                    detailsContainer.style.padding = '4px 8px 12px 38px'; // Offset to align with card content
 
-            if (selectedGroup && selectedGroup.models) {
-                selectedGroup.models.forEach(model => {
-                    const modelRemaining = Math.min(100, Math.max(0, model.remaining));
-                    const modelColor = getRemainingColor(modelRemaining);
+                    group.models.forEach(model => {
+                        const modelRemaining = Math.min(100, Math.max(0, model.remaining));
+                        const modelColor = getRemainingColor(modelRemaining);
 
-                    const modelDiv = document.createElement('div');
-                    modelDiv.className = 'model-item-compact';
-                    modelDiv.innerHTML = `
-                        <div class="usage-card-header">
-                            <span class="usage-card-name">${model.name}</span>
-                        </div>
-                        <div class="usage-card-progress">
-                            <div class="usage-bars" style="color: ${modelColor}">
-                                ${generateBars(modelRemaining, modelColor)}
+                        const modelDiv = document.createElement('div');
+                        modelDiv.className = 'model-item-compact';
+                        modelDiv.innerHTML = `
+                            <span class="usage-card-name" title="${model.name}">${model.name}</span>
+                            <div class="usage-card-progress">
+                                <div class="usage-bars" style="color: ${modelColor}">
+                                    ${generateBars(modelRemaining, modelColor)}
+                                </div>
+                                <span class="usage-card-percent">${modelRemaining}%</span>
                             </div>
-                            <span class="usage-card-percent">${modelRemaining}%</span>
-                        </div>
-                    `;
-                    usageListEl.appendChild(modelDiv);
-                });
-            }
+                        `;
+                        detailsContainer.appendChild(modelDiv);
+                    });
+                    usageGroupsEl.appendChild(detailsContainer);
+                }
+            });
         }
     }
 
@@ -342,14 +350,7 @@
     const ctxMenuEl = document.createElement('div');
     ctxMenuEl.className = 'ctx-menu';
     ctxMenuEl.innerHTML = `
-        <div class="ctx-item" id="ctx-open-current">
-            <svg class="ctx-icon" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-            Open in Current Window
-        </div>
-        <div class="ctx-item" id="ctx-open-new">
-            <svg class="ctx-icon" viewBox="0 0 24 24"><path d="M21 3h-6m6 0v6m0-6L14 10"></path><rect x="3" y="11" width="18" height="10" rx="2"></rect></svg>
-            Open in New Window
-        </div>
+
         <div class="ctx-item" id="ctx-separator" style="height:1px; background:var(--border-color); margin:4px 0; display:none;"></div>
         <div class="ctx-item" id="ctx-apply-skill" style="display:none;">
             <svg class="ctx-icon" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"></path><path d="M12 19h8"></path></svg>
@@ -370,19 +371,7 @@
     `;
     document.body.appendChild(ctxMenuEl);
 
-    document.getElementById('ctx-open-current').addEventListener('click', () => {
-        if (ctxMenuTarget) {
-            vscode.postMessage({ type: 'openProject', path: ctxMenuTarget.path, id: ctxMenuTarget.id, newWindow: false });
-            hideCtxMenu();
-        }
-    });
 
-    document.getElementById('ctx-open-new').addEventListener('click', () => {
-        if (ctxMenuTarget) {
-            vscode.postMessage({ type: 'openProject', path: ctxMenuTarget.path, id: ctxMenuTarget.id, newWindow: true });
-            hideCtxMenu();
-        }
-    });
 
     document.getElementById('ctx-reveal').addEventListener('click', () => {
         if (ctxMenuTarget) {
@@ -444,8 +433,6 @@
                 const isSkillRoot = targetEl.getAttribute('data-is-skill') === 'true';
 
                 // Toggle visibility based on type
-                const itemOpenCurrent = document.getElementById('ctx-open-current');
-                const itemOpenNew = document.getElementById('ctx-open-new');
                 const itemSeparator = document.getElementById('ctx-separator');
                 const itemApply = document.getElementById('ctx-apply-skill');
                 const itemDelete = document.getElementById('ctx-delete-skill');
@@ -453,11 +440,11 @@
                 const itemReveal = document.getElementById('ctx-reveal');
 
                 // Reset all
-                [itemOpenCurrent, itemOpenNew, itemSeparator, itemApply, itemDelete, itemInstall, itemReveal].forEach(el => el.style.display = 'none');
+                [itemSeparator, itemApply, itemDelete, itemInstall, itemReveal].forEach(el => {
+                    if (el) el.style.display = 'none';
+                });
 
                 if (isNormalProject) {
-                    itemOpenCurrent.style.display = 'flex';
-                    itemOpenNew.style.display = 'flex';
                     itemReveal.style.display = 'flex';
                 } else if (isGlobalHeader) {
                     itemInstall.style.display = 'flex';
@@ -513,80 +500,257 @@
         if (!projectListEl) return;
 
         try {
-            // 1. Render Global Skills Section
-            let globalEl = projectListEl.querySelector('.global-section');
-            if (globalSkills) {
-                if (!globalEl) {
-                    globalEl = document.createElement('div');
-                    globalEl.className = 'project-item global-section';
-                    globalEl.style.marginBottom = '8px'; // Reduced from 24px
-                    projectListEl.prepend(globalEl);
-                }
+            // Check if we should use flat layout (single project mode)
+            const useFlatLayout = projects.length === 1;
 
-                // Re-render header and content cleanly
-                globalEl.innerHTML = '';
-
-                const header = document.createElement('div');
-                header.className = 'project-header';
-                header.dataset.id = 'global-skills';
-                if (globalSkillsPath) header.dataset.path = globalSkillsPath; // Add path for context menu
-                header.style.cursor = 'pointer';
-                header.style.paddingBottom = '4px';
-
-                // Re-calculate expansion state
-                const isExpanded = expandedProjects.has('global-skills');
-
-                // Removed arrow as requested
-                // Add invisible arrow for alignment - Strict Structure Matching
-                // Project headers use empty span for arrow (no text content), so we do the same.
-                header.innerHTML = `
-                    <span class="folder-arrow"></span>
-                    <span class="dot red-global"></span>
-                    <span class="project-name">Global Skills</span>
-                `;
-
-                // Attach safe listener
-                header.onclick = (e) => {
-                    e.stopPropagation();
-                    console.log('[UI] Toggling Global Skills');
-                    toggleProjectExpansion('global-skills');
-                };
-
-                const content = document.createElement('div');
-                content.className = `project-content ${isExpanded ? '' : 'collapsed'}`;
-
-                const innerContent = document.createElement('div');
-                innerContent.className = 'skills-content';
-                // mimic .folder-container styles exactly for alignment
-                innerContent.style.marginLeft = '4px';
-                innerContent.style.paddingLeft = '8px';
-                innerContent.style.borderLeft = '1px solid var(--border-color)';
-
-                const hasSkills = globalSkills.length > 0;
-                if (hasSkills) {
-                    innerContent.innerHTML = renderSkills(globalSkills, 'global', 0);
-                    // Attach click listeners for files
-                    innerContent.querySelectorAll('.file-item').forEach(el => {
-                        el.onclick = (e) => {
-                            e.stopPropagation();
-                            console.log('[UI] Opening Global Skill file:', el.dataset.path);
-                            // Use dataset.path as set in renderSkills
-                            vscode.postMessage({ type: 'openFile', path: el.dataset.path });
-                        };
-                    });
-                } else {
-                    innerContent.innerHTML = '<div class="folder-empty">No global skills found</div>';
-                }
-
-                content.appendChild(innerContent);
-                globalEl.appendChild(header);
-                globalEl.appendChild(content);
-
-            } else if (globalEl) {
-                globalEl.remove();
+            if (useFlatLayout && projects.length > 0) {
+                // FLAT LAYOUT MODE: Single project
+                renderFlatLayout(projects[0]);
+            } else {
+                // NESTED LAYOUT MODE: Multiple projects or no projects
+                renderNestedLayout();
             }
         } catch (e) {
-            console.error('[UI] Error rendering Global Skills:', e);
+            console.error('[UI] Error in renderProjects:', e);
+        }
+    }
+
+    // Flat layout for single project
+    function renderFlatLayout(project) {
+        // Remove old nested layout elements
+        const oldProjects = projectListEl.querySelectorAll('.project-item:not(.global-section)');
+        oldProjects.forEach(el => el.remove());
+
+        // 1. Render Global Skills
+        renderGlobalSkillsSection();
+
+        // 3. Render Project Skills (flat)
+        renderFlatSection('skills', 'Project Skills', project);
+
+        // 4. Render Chats (flat)
+        renderFlatSection('chats', 'Chats', project);
+
+        // 5. Render Files (flat)
+        renderFlatSection('files', 'Files', project);
+    }
+
+    // Render a flat section (Skills/Chats/Files)
+    function renderFlatSection(type, label, project) {
+        const sectionId = `flat-${type}-${safeId(project.id)}`;
+        const contentId = `content-${type}-${safeId(project.id)}`;
+
+        let sectionEl = projectListEl.querySelector(`.flat-section[data-type="${type}"]`);
+
+        if (!sectionEl) {
+            sectionEl = document.createElement('div');
+            sectionEl.className = 'flat-section folder-container';
+            sectionEl.setAttribute('data-type', type);
+
+            const header = document.createElement('div');
+            header.className = 'folder-header';
+            header.setAttribute('data-target', contentId);
+            if (type === 'skills') {
+                const skillsPath = (project.path || '').replace(/\/$/, '') + '/.agent/skills';
+                header.setAttribute('data-path', skillsPath);
+            } else if (type === 'files') {
+                header.setAttribute('data-path', project.path);
+            }
+            header.setAttribute('data-type', type);
+            header.innerHTML = `
+                <span class="folder-arrow">▼</span>
+                <span>${label}</span>
+            `;
+
+            const content = document.createElement('div');
+            content.id = contentId;
+            content.className = 'folder-content';
+
+            sectionEl.appendChild(header);
+            sectionEl.appendChild(content);
+            projectListEl.appendChild(sectionEl);
+
+        }
+
+        // Update expansion state
+        const isExpanded = expandedFolders.has(contentId);
+        const arrow = sectionEl.querySelector('.folder-arrow');
+        const contentDiv = sectionEl.querySelector(`#${contentId}`);
+
+        if (arrow) arrow.className = 'folder-arrow' + (isExpanded ? '' : ' collapsed');
+        if (contentDiv) contentDiv.className = 'folder-content' + (isExpanded ? '' : ' collapsed');
+
+        // Update content based on type
+        if (isExpanded && contentDiv) {
+            if (type === 'skills') {
+                const projectSkills = skills[project.id];
+                if (projectSkills && projectSkills.length > 0) {
+                    const newHtml = renderSkills(projectSkills, project.id, 0);
+                    if (contentDiv.innerHTML !== newHtml) {
+                        contentDiv.innerHTML = newHtml;
+                        bindFileClickEvents(contentDiv);
+                    }
+                } else {
+                    contentDiv.innerHTML = '<div class="folder-empty">No skills found</div>';
+                }
+            } else if (type === 'chats') {
+                renderChatsInner(contentDiv, project, allConversations);
+            } else if (type === 'files') {
+                const filesData = projectFiles[project.id];
+                if (filesData && filesData.length > 0) {
+                    const newHtml = renderSkills(filesData, project.id, 0);
+                    if (contentDiv.innerHTML !== newHtml) {
+                        contentDiv.innerHTML = newHtml;
+                        bindFileClickEvents(contentDiv);
+                    }
+                } else if (!filesData) {
+                    vscode.postMessage({ type: 'requestFiles', projectId: project.id, path: project.path });
+                    contentDiv.innerHTML = '<div class="folder-empty">Loading project files...</div>';
+                } else {
+                    contentDiv.innerHTML = '<div class="folder-empty">No files found</div>';
+                }
+            }
+        }
+    }
+
+    // Helper to bind file click events
+    function bindFileClickEvents(container) {
+        container.querySelectorAll('.file-item').forEach(el => {
+            el.onclick = (e) => {
+                e.stopPropagation();
+                const filePath = el.getAttribute('data-path');
+                if (filePath) {
+                    vscode.postMessage({ type: 'openFile', path: filePath });
+                }
+            };
+        });
+    }
+
+    // Render Global Skills section
+    function renderGlobalSkillsSection() {
+        let globalEl = projectListEl.querySelector('.global-section');
+        if (globalSkills) {
+            if (!globalEl) {
+                globalEl = document.createElement('div');
+                globalEl.className = 'flat-section folder-container global-section';
+                globalEl.style.marginBottom = '8px';
+                projectListEl.prepend(globalEl);
+            }
+
+            globalEl.innerHTML = '';
+
+            const header = document.createElement('div');
+            header.className = 'folder-header';
+            header.dataset.target = 'global-skills-content';
+            if (globalSkillsPath) header.dataset.path = globalSkillsPath;
+            header.style.cursor = 'pointer';
+
+            const isExpanded = expandedFolders.has('global-skills-content');
+
+            header.innerHTML = `
+                <span class="folder-arrow${isExpanded ? '' : ' collapsed'}">▼</span>
+                <span>Global Skills</span>
+            `;
+
+            const content = document.createElement('div');
+            content.id = 'global-skills-content';
+            content.className = `folder-content ${isExpanded ? '' : 'collapsed'}`;
+
+            const hasSkills = globalSkills.length > 0;
+            if (hasSkills) {
+                content.innerHTML = renderSkills(globalSkills, 'global', 0);
+                content.querySelectorAll('.file-item').forEach(el => {
+                    el.onclick = (e) => {
+                        e.stopPropagation();
+                        vscode.postMessage({ type: 'openFile', path: el.dataset.path });
+                    };
+                });
+            } else {
+                content.innerHTML = '<div class="folder-empty">No global skills found</div>';
+            }
+
+            globalEl.appendChild(header);
+            globalEl.appendChild(content);
+        } else if (globalEl) {
+            globalEl.remove();
+        }
+    }
+
+    // Nested layout for multiple projects
+    function renderNestedLayout() {
+        // Clear any flat layout elements
+        projectListEl.innerHTML = ''; // Clear everything for a fresh render of nested layout
+
+        // 1. Render Global Skills Section
+        let globalEl = projectListEl.querySelector('.global-section');
+        if (globalSkills) {
+            if (!globalEl) {
+                globalEl = document.createElement('div');
+                globalEl.className = 'project-item global-section';
+                globalEl.style.marginBottom = '8px'; // Reduced from 24px
+                projectListEl.prepend(globalEl);
+            }
+
+            // Re-render header and content cleanly
+            globalEl.innerHTML = '';
+
+            const header = document.createElement('div');
+            header.className = 'project-header';
+            header.dataset.id = 'global-skills';
+            if (globalSkillsPath) header.dataset.path = globalSkillsPath; // Add path for context menu
+            header.style.cursor = 'pointer';
+            header.style.paddingBottom = '4px';
+
+            // Re-calculate expansion state
+            const isExpanded = expandedProjects.has('global-skills');
+
+            // Removed arrow as requested
+            // Add invisible arrow for alignment - Strict Structure Matching
+            // Project headers use empty span for arrow (no text content), so we do the same.
+            header.innerHTML = `
+                <span class="folder-arrow"></span>
+                <span class="dot red-global"></span>
+                <span class="project-name">Global Skills</span>
+            `;
+
+            // Attach safe listener
+            header.onclick = (e) => {
+                e.stopPropagation();
+                console.log('[UI] Toggling Global Skills');
+                toggleProjectExpansion('global-skills');
+            };
+
+            const content = document.createElement('div');
+            content.className = `project-content ${isExpanded ? '' : 'collapsed'}`;
+
+            const innerContent = document.createElement('div');
+            innerContent.className = 'skills-content';
+            // mimic .folder-container styles exactly for alignment
+            innerContent.style.marginLeft = '4px';
+            innerContent.style.paddingLeft = '8px';
+            innerContent.style.borderLeft = '1px solid var(--border-color)';
+
+            const hasSkills = globalSkills.length > 0;
+            if (hasSkills) {
+                innerContent.innerHTML = renderSkills(globalSkills, 'global', 0);
+                // Attach click listeners for files
+                innerContent.querySelectorAll('.file-item').forEach(el => {
+                    el.onclick = (e) => {
+                        e.stopPropagation();
+                        console.log('[UI] Opening Global Skill file:', el.dataset.path);
+                        // Use dataset.path as set in renderSkills
+                        vscode.postMessage({ type: 'openFile', path: el.dataset.path });
+                    };
+                });
+            } else {
+                innerContent.innerHTML = '<div class="folder-empty">No global skills found</div>';
+            }
+
+            content.appendChild(innerContent);
+            globalEl.appendChild(header);
+            globalEl.appendChild(content);
+
+        } else if (globalEl) {
+            globalEl.remove();
         }
 
         const projectStartIndex = globalSkills ? 1 : 0;
@@ -766,7 +930,7 @@
         contentEl.className = 'project-content' + (isProjectExpanded ? '' : ' collapsed');
 
         // --- Chats Folder ---
-        const chatContentId = `content-chats-${project.id}`;
+        const chatContentId = `content-chats-${safeId(project.id)}`;
         let chatsContainer = contentEl.querySelector(`.folder-container[data-type="chats"]`);
 
         if (!chatsContainer) {
@@ -804,7 +968,7 @@
 
 
         // --- Skills Folder ---
-        const skillsContentId = `content-skills-${project.id}`;
+        const skillsContentId = `content-skills-${safeId(project.id)}`;
         let skillsContainer = contentEl.querySelector(`.folder-container[data-type="skills"]`);
 
         // Construct standard skills path
@@ -867,7 +1031,7 @@
         }
 
         // --- Files Folder ---
-        const filesContentId = `content-files-${project.id}`;
+        const filesContentId = `content-files-${safeId(project.id)}`;
         let filesContainer = contentEl.querySelector(`.folder-container[data-type="files"]`);
 
         if (!filesContainer) {
@@ -931,8 +1095,13 @@
         // 1. Try to find matching convos
         function normalizePath(p) {
             if (!p) return '';
-            // Handle file:// protocol, normalize slashes, and lowercase for robust comparison
-            return decodeURIComponent(p.replace(/^file:\/\//, ''))
+            // Handle file:// protocol, normalize slashes
+            let decoded = p;
+            try {
+                decoded = decodeURIComponent(p.replace(/^file:\/\/\/?/, ''));
+            } catch (e) { }
+
+            return decoded
                 .replace(/\\/g, '/')
                 .replace(/\/$/, '')
                 .toLowerCase();
@@ -1013,6 +1182,16 @@
                 });
             };
         });
+    }
+
+    function toggleFolderExpansion(folderId) {
+        if (expandedFolders.has(folderId)) {
+            expandedFolders.delete(folderId);
+        } else {
+            expandedFolders.add(folderId);
+        }
+        saveState();
+        renderProjects();
     }
 
     function toggleProjectExpansion(projectId) {

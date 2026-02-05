@@ -4,6 +4,9 @@ import { ProjectsViewProvider } from './projectsViewProvider';
 export function activate(context: vscode.ExtensionContext) {
     const provider = new ProjectsViewProvider(context.extensionUri, context);
 
+    // One-time cleanup of old project configurations
+    context.globalState.update('antigravity.projects', undefined);
+
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(ProjectsViewProvider.viewType, provider, {
             webviewOptions: {
@@ -14,11 +17,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('antigravity.projects.addProject', () => {
-            provider.addProject();
-        })
-    );
+
 
     context.subscriptions.push(
         vscode.commands.registerCommand('antigravity.projects.clearCache', async () => {

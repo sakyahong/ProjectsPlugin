@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { ProjectStore } from './projectStore';
 import { SessionParser } from './sessionParser';
 import { Project, Session, Conversation } from './types';
 import { PortDetector } from './services/portDetector';
@@ -13,7 +12,6 @@ import { SkillService } from './services/skillService';
 export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'antigravity.projectsView';
     private _view?: vscode.WebviewView;
-    private projectStore: ProjectStore;
     private sessionParser: SessionParser;
     private portDetector: PortDetector;
     private quotaService: QuotaService;
@@ -33,7 +31,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         private readonly _extensionUri: vscode.Uri,
         private readonly context: vscode.ExtensionContext
     ) {
-        this.projectStore = new ProjectStore(context);
+        this.sessionParser = new SessionParser();
         this.sessionParser = new SessionParser();
         this.portDetector = new PortDetector();
         this.quotaService = new QuotaService();
@@ -52,10 +50,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             this.runBackgroundDetection();
         }, 15000);
 
-        // Auto-sync for projects (every 5s) to detect changes from other windows
-        this.autoSyncTimer = setInterval(() => {
-            this.checkAndRefreshIfProjectsChanged();
-        }, 5000);
+
 
         context.subscriptions.push({
             dispose: () => {
@@ -87,25 +82,13 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.type) {
-                case 'openProject':
-                    if (data.path) {
-                        const uri = vscode.Uri.file(data.path);
-                        const forceNewWindow = !!data.newWindow;
-                        vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: forceNewWindow });
-                        this.projectStore.updateLastOpened(data.id);
-                    }
-                    break;
+
                 case 'handleChatClick':
                     if (data.cascadeId) {
                         this.handleChatRequest(data.cascadeId, data.projectPath);
                     }
                     break;
-                case 'deleteProject':
-                    if (data.id) {
-                        await this.projectStore.deleteProject(data.id);
-                        this.refresh();
-                    }
-                    break;
+
                 case 'revealInOS':
                     if (data.path) {
                         vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(data.path));
@@ -182,29 +165,15 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             // Same project, just open chat
             vscode.commands.executeCommand('antigravity.setVisibleConversation', cascadeId);
         } else {
-            // Different project, prompt user
-            const action = await vscode.window.showQuickPick(
-                ['Open Project in Current Window & Chat', 'Open Project in New Window & Chat'],
-                { placeHolder: 'This chat belongs to a different project.' }
-            );
-
-            if (!action) return;
-
+            // Different project - just open it
             const uri = vscode.Uri.file(targetPath);
-
-            if (action.includes('New Window')) {
-                // For new window, we can't easily auto-open the chat there without more complex state
-                // But we open the folder as requested.
-                vscode.commands.executeCommand('vscode.openFolder', uri, true);
-            } else {
-                // Switch Window (Reloads extension)
-                // Persist pending chat with timestamp to meet extension.ts requirement
-                await this.context.globalState.update('pendingOpenConversation', {
-                    id: cascadeId,
-                    timestamp: Date.now()
-                });
-                vscode.commands.executeCommand('vscode.openFolder', uri, false);
-            }
+            vscode.commands.executeCommand('vscode.openFolder', uri, false);
+            // Switch Window (Reloads extension)
+            // Persist pending chat with timestamp to meet extension.ts requirement
+            await this.context.globalState.update('pendingOpenConversation', {
+                id: cascadeId,
+                timestamp: Date.now()
+            });
         }
     }
 
@@ -229,7 +198,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleApplySkill(sourcePath: string) {
-        const projects = this.projectStore.getProjects();
+        const folders = vscode.workspace.workspaceFolders || [];
         // Define Global Target
         const globalPath = path.join(os.homedir(), '.gemini/antigravity/global_skills');
 
@@ -248,14 +217,14 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         }
 
         // Add Project options
-        projects.forEach(p => {
-            const projectSkillsPath = path.join(p.path, '.agent/skills');
+        folders.forEach(f => {
+            const folderPath = this.normalizePath(f.uri.fsPath);
+            const projectSkillsPath = path.join(folderPath, '.agent/skills');
             // Check if source is NOT inside this project
-            // Simple string check is usually sufficient for standard paths
             if (!this.isSubPath(projectSkillsPath, sourcePath)) {
                 targets.push({
-                    label: p.name,
-                    description: p.path,
+                    label: f.name,
+                    description: folderPath,
                     targetPath: projectSkillsPath
                 });
             }
@@ -497,39 +466,12 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    public async addProject() {
-        const result = await vscode.window.showOpenDialog({
-            canSelectFiles: false,
-            canSelectFolders: true,
-            canSelectMany: false,
-            openLabel: 'Select Project'
-        });
 
-        if (result && result[0]) {
-            const projectPath = result[0].fsPath;
-            const projectName = result[0].path.split('/').pop() || 'Untitled';
-
-            // Check duplicate
-            const existing = this.projectStore.getProjects().find(p => p.path === projectPath);
-            if (existing) {
-                vscode.window.showWarningMessage(`Project '${projectName}' is already in the list.`);
-                return;
-            }
-
-            try {
-                await this.projectStore.addProject(projectName, projectPath);
-                await this.refresh();
-            } catch (error) {
-                vscode.window.showErrorMessage(`Failed to add project: ${error}`);
-            }
-        }
-    }
 
     // Manage file watchers for all projects
     private fileWatchers: vscode.FileSystemWatcher[] = [];
 
-    private refreshWatchers() {
-        const projects = this.projectStore.getProjects();
+    private refreshWatchers(projects: Project[]) {
         console.log(`[Watcher] Refreshing watchers for ${projects.length} projects`);
 
         // Simple check to avoid redundant recreation if project paths haven't changed
@@ -566,7 +508,6 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             // Pattern 3: Broader watcher for the .agent folder to be safe
             // Use both casing just in case
             const patterns = [
-                '**/*',
                 '.agent/skills/**/*',
                 '.agent/skills',
                 '.agent/Skills/**/*',
@@ -598,42 +539,6 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    private async checkAndRefreshIfProjectsChanged() {
-        const projects = this.projectStore.getProjects();
-        let changed = false;
-
-        // Verify existence during sync
-        for (const project of projects) {
-            if (!fs.existsSync(project.path)) {
-                console.log(`[AutoSync] Project folder missing, cleaning up: ${project.path}`);
-                await this.projectStore.deleteProject(project.id);
-                changed = true;
-            }
-        }
-
-        const finalProjects = this.projectStore.getProjects();
-        const currentPaths = finalProjects.map(p => this.normalizePath(p.path)).sort().join('|');
-        if ((this as any)._lastAutoSyncPaths !== currentPaths || changed) {
-            console.log('[AutoSync] Projects list or files changed, refreshing UI...');
-            (this as any)._lastAutoSyncPaths = currentPaths;
-            this.refresh();
-        }
-    }
-
-    private async checkAndAutoAddWorkspace() {
-        const folders = vscode.workspace.workspaceFolders;
-        if (folders && folders.length > 0) {
-            const projects = this.projectStore.getProjects();
-            for (const folder of folders) {
-                const normPath = this.normalizePath(folder.uri.fsPath);
-                if (!projects.some(p => this.normalizePath(p.path) === normPath)) {
-                    console.log(`[AutoAdd] Adding workspace folder to projects: ${normPath}`);
-                    await this.projectStore.addProject(folder.name, normPath);
-                }
-            }
-        }
-    }
-
     private debounce(func: Function, wait: number) {
         let timeout: NodeJS.Timeout;
         return (...args: any[]) => {
@@ -645,23 +550,29 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
     public async refresh() {
         console.log('[Refresh] refresh() called');
         if (this._view) {
-            // Auto add current workspace if missing
-            await this.checkAndAutoAddWorkspace();
-
-            const allProjects = this.projectStore.getProjects();
             const projects: Project[] = [];
+            const folders = vscode.workspace.workspaceFolders || [];
 
-            // Cleanup missing projects first
-            for (const project of allProjects) {
-                if (!fs.existsSync(project.path)) {
-                    console.log(`[Cleanup] Project folder no longer exists, removing from store: ${project.path}`);
-                    await this.projectStore.deleteProject(project.id);
-                } else {
-                    projects.push(project);
-                }
+            for (const folder of folders) {
+                const folderPath = this.normalizePath(folder.uri.fsPath);
+                projects.push({
+                    id: folderPath, // Use path as ID since it's unique per workspace
+                    name: folder.name,
+                    path: folderPath,
+                    category: '',
+                    createdAt: 0,
+                    lastOpenedAt: Date.now()
+                });
             }
 
-            this.refreshWatchers();
+            // Set dynamic title if single project
+            if (projects.length === 1) {
+                this._view.title = projects[0].name;
+            } else {
+                this._view.title = 'Projects'; // Default/Fallback
+            }
+
+            this.refreshWatchers(projects);
 
             let activeProjectPath: string | null = null;
             if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
@@ -684,7 +595,6 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             (async () => {
                 const projectSessions: { [key: string]: Session[] } = {};
                 const projectSkills: { [key: string]: any[] } = {};
-                const projectFiles: { [key: string]: any[] } = {};
 
                 // 1. Define Global Skills Fetch logic
                 const globalSkillsPath = path.join(os.homedir(), '.gemini/antigravity/global_skills');
@@ -706,15 +616,15 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     try {
                         const normPath = this.normalizePath(project.path);
                         // Inner parallel fetch for independent data sources
-                        const [sessions, skills, files] = await Promise.all([
+                        const [sessions, skills] = await Promise.all([
                             this.sessionParser.getSessionsForProject(normPath).then(s => s.slice(0, 3)),
-                            this.skillService.getSkillsForProject(normPath),
-                            this.skillService.getSkillsFromPath(normPath)
+                            this.skillService.getSkillsForProject(normPath)
                         ]);
 
                         projectSessions[project.id] = sessions;
                         projectSkills[project.id] = skills;
-                        projectFiles[project.id] = files;
+
+                        console.log(`[Phase2] Loaded for ${project.name}: sessions=${sessions.length}, skills=${skills.length}`);
 
                         // Immediate partial update for this project
                         this._view?.webview.postMessage({
@@ -722,10 +632,10 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                             projects: projects,
                             sessions: projectSessions,
                             skills: projectSkills,
-                            files: projectFiles,
                             activeProjectPath: activeProjectPath,
                             partial: true
                         });
+                        console.log(`[Phase2] Sent partial update for ${project.name}`);
                     } catch (error) {
                         console.error(`Failed to load data for project ${project.name}:`, error);
                     }
@@ -740,12 +650,13 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 // 4. Final Update (All settled)
                 const globalSkills = await globalSkillsPromise;
 
+                console.log(`[Phase2] Final update - projects: ${projects.length}, sessions keys: ${Object.keys(projectSessions)}, skills keys: ${Object.keys(projectSkills)}`);
+
                 this._view?.webview.postMessage({
                     type: 'update',
                     projects: projects,
                     sessions: projectSessions,
                     skills: projectSkills,
-                    files: projectFiles,
                     globalSkills: globalSkills,
                     globalSkillsPath: globalSkillsPath,
                     activeProjectPath: activeProjectPath
@@ -787,13 +698,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                         <div class="usage-display">
                             <div class="usage-container-card">
                                 <!-- Groups Overview -->
-                                <div class="usage-groups" id="usage-groups">
-                                    <!-- Injected by JS -->
-                                </div>
-
-
-                                <!-- Expandable List for Details (toggled by clicking cards) -->
-                                <div class="usage-list" id="usage-list">
+                                <div class="usage-groups visible" id="usage-groups">
                                     <!-- Injected by JS -->
                                 </div>
                             </div>

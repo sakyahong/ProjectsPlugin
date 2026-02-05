@@ -2,7 +2,7 @@
   "name": "projects-chats-skiils",
   "displayName": "Projects Chats&Skiils",
   "description": "Project management sidebar with Skills and Chats integration",
-  "version": "0.1.23",
+  "version": "0.1.31",
   "publisher": "antigravity",
   "engines": {
     "vscode": "^1.80.0"
@@ -35,31 +35,20 @@
         {
           "id": "antigravity.projectsView",
           "name": "",
-          "type": "webview"
+          "type": "webview",
+          "icon": "media/folder-icon.png"
         }
       ]
     },
     "commands": [
       {
-        "command": "antigravity.projects.addProject",
-        "title": "Add Project",
-        "icon": "$(add)"
-      },
-      {
         "command": "antigravity.projects.clearCache",
         "title": "Clear Projects Cache",
-        "category": "Antigravity Projects"
+        "category": "Antigravity Projects",
+        "icon": "$(trash)"
       }
     ],
-    "menus": {
-      "view/title": [
-        {
-          "command": "antigravity.projects.addProject",
-          "when": "view == antigravity.projectsView",
-          "group": "navigation@2"
-        }
-      ]
-    }
+    "menus": {}
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
