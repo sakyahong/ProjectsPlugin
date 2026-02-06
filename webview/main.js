@@ -20,6 +20,13 @@
     // Track expanded projects (Set of strings) - Default empty means all collapsed
     let expandedProjects = new Set(previousState.expandedProjects || []);
 
+    const LUCIDE_ICONS = {
+        sparkles: `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path><path d="M5 3v4"></path><path d="M19 17v4"></path><path d="M3 5h4"></path><path d="M17 19h4"></path></svg>`,
+        sparkle: `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></svg>`,
+        message: `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`,
+        folder: `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>`
+    };
+
     function saveState() {
         vscode.setState({
             selectedGroupId: selectedGroupId,
@@ -550,11 +557,11 @@
 
             // Icon Mapping
             const icons = {
-                'skills': { icon: '🛠️', class: 'icon-project' },
-                'chats': { icon: '💬', class: 'icon-chats' },
-                'files': { icon: '📂', class: 'icon-files' }
+                'skills': { icon: LUCIDE_ICONS.sparkle, class: 'icon-project' },
+                'chats': { icon: LUCIDE_ICONS.message, class: 'icon-chats' },
+                'files': { icon: LUCIDE_ICONS.folder, class: 'icon-files' }
             };
-            const config = icons[type] || { icon: '📁', class: 'icon-project' };
+            const config = icons[type] || { icon: LUCIDE_ICONS.folder, class: 'icon-project' };
 
             const header = document.createElement('div');
             header.className = 'folder-header';
@@ -648,7 +655,7 @@
             if (!globalEl) {
                 globalEl = document.createElement('div');
                 globalEl.className = 'flat-section section-card global-section';
-                globalEl.style.marginBottom = '8px';
+                globalEl.style.marginBottom = '4px';
                 projectListEl.prepend(globalEl);
             }
 
@@ -663,7 +670,7 @@
             const isExpanded = expandedFolders.has('global-skills-content');
 
             header.innerHTML = `
-                <div class="section-icon icon-global">🌍</div>
+                <div class="section-icon icon-global">${LUCIDE_ICONS.sparkles}</div>
                 <span class="section-title">Global Skills</span>
                 <span class="section-arrow ${isExpanded ? '' : 'collapsed'}">▼</span>
             `;

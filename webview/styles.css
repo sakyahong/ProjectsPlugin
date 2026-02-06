@@ -644,37 +644,40 @@ body.vscode-light .usage-card.clickable:hover {
 .section-card {
     background-color: var(--usage-card-bg, rgba(30, 41, 59, 0.5));
     border-radius: 12px;
-    margin-bottom: 8px;
-    border: 1px solid var(--usage-card-border, rgba(51, 65, 85, 0.5));
+    margin-bottom: 4px;
+    border: none;
     transition: all 0.2s ease;
     overflow: hidden;
 }
 
 .section-card:hover {
     background-color: var(--usage-card-hover-bg, rgba(30, 41, 59, 0.8));
-    border-color: var(--usage-card-hover-border, rgba(71, 85, 105, 0.8));
+    border: none;
 }
 
 .section-card .folder-header {
-    padding: 10px 12px;
+    padding: 4px 12px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     background: transparent !important;
     border: none !important;
     margin: 0 !important;
 }
 
 .section-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
+    width: 24px;
+    height: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
     flex-shrink: 0;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.section-icon svg {
+    display: block;
 }
 
 .section-title {
@@ -694,21 +697,21 @@ body.vscode-light .usage-card.clickable:hover {
     transform: rotate(-90deg);
 }
 
-/* Specific Section Icon Colors */
+/* Specific Section Icon Colors - Lines only, no backgrounds */
 .icon-global {
-    background-color: #3b82f6;
+    color: #60a5fa;
 }
 
 .icon-project {
-    background-color: #8b5cf6;
+    color: #a78bfa;
 }
 
 .icon-chats {
-    background-color: #f59e0b;
+    color: #fbbf24;
 }
 
 .icon-files {
-    background-color: #10b981;
+    color: #34d399;
 }
 
 .section-card .folder-content {
