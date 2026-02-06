@@ -2,7 +2,7 @@
   "name": "projects-chats-skiils",
   "displayName": "Projects Chats&Skiils",
   "description": "Project management sidebar with Skills and Chats integration",
-  "version": "0.1.48",
+  "version": "0.1.50",
   "publisher": "antigravity",
   "engines": {
     "vscode": "^1.80.0"

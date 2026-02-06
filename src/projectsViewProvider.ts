@@ -120,16 +120,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                     this.refresh();
                     this.triggerAsyncLoad();
                     break;
-                case 'requestFiles':
-                    if (data.projectId && data.path) {
-                        const files = await this.skillService.getSkillsFromPath(data.path);
-                        this._view?.webview.postMessage({
-                            type: 'filesUpdate',
-                            projectId: data.projectId,
-                            files: files
-                        });
-                    }
-                    break;
+
             }
         });
     }
@@ -503,17 +494,8 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             const normPath = this.normalizePath(project.path);
             console.log(`[Watcher] Creating multiple watchers for ${normPath}`);
 
-            // Pattern 1: Any file change inside .agent/skills (recursive)
-            // Pattern 2: Changes to the .agent/skills directory itself (like adding new top-level skill folders)
-            // Pattern 3: Broader watcher for the .agent folder to be safe
-            // Use both casing just in case
-            const patterns = [
-                '.agent/skills/**/*',
-                '.agent/skills',
-                '.agent/Skills/**/*',
-                '.agent/Skills',
-                '.agent/**/*'
-            ];
+            // Unified pattern: watch all changes inside .agent folder (covers skills, Skills, workflows, etc.)
+            const patterns = ['.agent/**/*'];
 
             const debouncedRefresh = this.debounce((reason: string) => {
                 console.log(`[Watcher] Triggering refresh for ${project.name}. Reason: ${reason}`);

@@ -6,7 +6,7 @@
     let projects = [];
     let sessions = {};
     let skills = {};
-    let projectFiles = {};
+
     let globalSkills = undefined;
 
     let globalSkillsPath = null; // Store global path
@@ -143,11 +143,7 @@
                     }
                 }
 
-                if (message.files) {
-                    projectFiles = message.files;
-                    changed = true;
-                    console.log('[UI][DEBUG] Project files updated');
-                }
+
 
                 if (message.activeProjectPath !== undefined && activeProjectPath !== message.activeProjectPath) {
                     activeProjectPath = message.activeProjectPath;
@@ -160,13 +156,7 @@
                 }
                 break;
 
-            case 'filesUpdate':
-                if (message.projectId && message.files) {
-                    projectFiles[message.projectId] = message.files;
-                    console.log('[UI][DEBUG] Partial files updated for:', message.projectId);
-                    debouncedRenderProjects();
-                }
-                break;
+
 
             case 'conversationsUpdate':
                 if (message.conversations) {
@@ -540,8 +530,6 @@
         // 4. Render Chats (flat)
         renderFlatSection('chats', 'Chats', project);
 
-        // 5. Render Files (flat)
-        renderFlatSection('files', 'Files', project);
     }
 
     // Render a flat section (Skills/Chats/Files)
@@ -556,11 +544,9 @@
             sectionEl.className = 'flat-section section-card';
             sectionEl.setAttribute('data-type', type);
 
-            // Icon Mapping
             const icons = {
                 'skills': { icon: LUCIDE_ICONS.sparkle, class: 'icon-project' },
-                'chats': { icon: LUCIDE_ICONS.message, class: 'icon-chats' },
-                'files': { icon: LUCIDE_ICONS.folder, class: 'icon-files' }
+                'chats': { icon: LUCIDE_ICONS.message, class: 'icon-chats' }
             };
             const config = icons[type] || { icon: LUCIDE_ICONS.folder, class: 'icon-project' };
 
@@ -570,8 +556,6 @@
             if (type === 'skills') {
                 const skillsPath = (project.path || '').replace(/\/$/, '') + '/.agent/skills';
                 header.setAttribute('data-path', skillsPath);
-            } else if (type === 'files') {
-                header.setAttribute('data-path', project.path);
             }
             header.setAttribute('data-type', type);
 
@@ -619,20 +603,6 @@
                 }
             } else if (type === 'chats') {
                 renderChatsInner(contentDiv, project, allConversations);
-            } else if (type === 'files') {
-                const filesData = projectFiles[project.id];
-                if (filesData && filesData.length > 0) {
-                    const newHtml = renderSkills(filesData, project.id, 0, 'files');
-                    if (contentDiv.innerHTML !== newHtml) {
-                        contentDiv.innerHTML = newHtml;
-                        bindFileClickEvents(contentDiv);
-                    }
-                } else if (!filesData) {
-                    vscode.postMessage({ type: 'requestFiles', projectId: project.id, path: project.path });
-                    contentDiv.innerHTML = '<div class="folder-empty">Loading project files...</div>';
-                } else {
-                    contentDiv.innerHTML = '<div class="folder-empty">No files found</div>';
-                }
             }
         }
     }
@@ -1055,60 +1025,6 @@
             }
         }
 
-        // --- Files Folder ---
-        const filesContentId = `content-files-${safeId(project.id)}`;
-        let filesContainer = contentEl.querySelector(`.folder-container[data-type="files"]`);
-
-        if (!filesContainer) {
-            filesContainer = document.createElement('div');
-            filesContainer.className = 'folder-container';
-            filesContainer.setAttribute('data-type', 'files');
-            filesContainer.innerHTML = `
-                <div class="folder-header" data-target="${filesContentId}" data-path="${project.path}" data-type="files">
-                    <span class="folder-arrow">▼</span>
-                    <span>Files</span>
-                </div>
-                <div id="${filesContentId}" class="folder-content"></div>
-            `;
-            contentEl.appendChild(filesContainer);
-        }
-
-        // Update Files State
-        const isFilesExpanded = expandedFolders.has(filesContentId);
-        const filesArrow = filesContainer.querySelector('.folder-arrow');
-        const filesContentDiv = filesContainer.querySelector(`#${filesContentId}`);
-
-        filesArrow.className = 'folder-arrow' + (isFilesExpanded ? '' : ' collapsed');
-        filesContentDiv.className = 'folder-content' + (isFilesExpanded ? '' : ' collapsed');
-
-        // Update Files Content
-        if (isFilesExpanded) {
-            const filesData = projectFiles[project.id];
-            if (filesData && filesData.length > 0) {
-                const newFilesHtml = renderSkills(filesData, project.id, 0, 'files'); // Reuse tree renderer
-                if (filesContentDiv.innerHTML !== newFilesHtml) {
-                    filesContentDiv.innerHTML = newFilesHtml;
-                    // Re-bind click events for files
-                    filesContentDiv.querySelectorAll('.file-item').forEach(el => {
-                        el.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            const filePath = el.getAttribute('data-path');
-                            if (filePath) {
-                                vscode.postMessage({ type: 'openFile', path: filePath });
-                            }
-                        });
-                    });
-                }
-            } else {
-                // Trigger fetch if empty and expanded
-                if (!filesData) {
-                    vscode.postMessage({ type: 'requestFiles', projectId: project.id, path: project.path });
-                    filesContentDiv.innerHTML = '<div class="folder-empty">Loading project files...</div>';
-                } else {
-                    filesContentDiv.innerHTML = '<div class="folder-empty">No files found</div>';
-                }
-            }
-        }
     }
 
     function renderChatsInner(container, project, allConvos) {
