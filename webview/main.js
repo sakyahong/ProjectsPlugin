@@ -543,8 +543,16 @@
 
         if (!sectionEl) {
             sectionEl = document.createElement('div');
-            sectionEl.className = 'flat-section folder-container';
+            sectionEl.className = 'flat-section section-card';
             sectionEl.setAttribute('data-type', type);
+
+            // Icon Mapping
+            const icons = {
+                'skills': { icon: '🛠️', class: 'icon-project' },
+                'chats': { icon: '💬', class: 'icon-chats' },
+                'files': { icon: '📂', class: 'icon-files' }
+            };
+            const config = icons[type] || { icon: '📁', class: 'icon-project' };
 
             const header = document.createElement('div');
             header.className = 'folder-header';
@@ -556,28 +564,35 @@
                 header.setAttribute('data-path', project.path);
             }
             header.setAttribute('data-type', type);
+
+            const isExpanded = expandedFolders.has(contentId);
+
             header.innerHTML = `
-                <span class="folder-arrow">▼</span>
-                <span>${label}</span>
+                <div class="section-icon ${config.class}">${config.icon}</div>
+                <span class="section-title">${label}</span>
+                <span class="section-arrow ${isExpanded ? '' : 'collapsed'}">▼</span>
             `;
 
             const content = document.createElement('div');
             content.id = contentId;
-            content.className = 'folder-content';
+            content.className = `folder-content ${isExpanded ? '' : 'collapsed'}`;
 
             sectionEl.appendChild(header);
             sectionEl.appendChild(content);
             projectListEl.appendChild(sectionEl);
-
         }
 
         // Update expansion state
         const isExpanded = expandedFolders.has(contentId);
-        const arrow = sectionEl.querySelector('.folder-arrow');
+        const arrow = sectionEl.querySelector('.section-arrow');
         const contentDiv = sectionEl.querySelector(`#${contentId}`);
 
-        if (arrow) arrow.className = 'folder-arrow' + (isExpanded ? '' : ' collapsed');
-        if (contentDiv) contentDiv.className = 'folder-content' + (isExpanded ? '' : ' collapsed');
+        if (arrow) {
+            arrow.className = 'section-arrow' + (isExpanded ? '' : ' collapsed');
+        }
+        if (contentDiv) {
+            contentDiv.className = 'folder-content' + (isExpanded ? '' : ' collapsed');
+        }
 
         // Update content based on type
         if (isExpanded && contentDiv) {
@@ -625,13 +640,12 @@
         });
     }
 
-    // Render Global Skills section
     function renderGlobalSkillsSection() {
         let globalEl = projectListEl.querySelector('.global-section');
         if (globalSkills) {
             if (!globalEl) {
                 globalEl = document.createElement('div');
-                globalEl.className = 'flat-section folder-container global-section';
+                globalEl.className = 'flat-section section-card global-section';
                 globalEl.style.marginBottom = '8px';
                 projectListEl.prepend(globalEl);
             }
@@ -647,8 +661,9 @@
             const isExpanded = expandedFolders.has('global-skills-content');
 
             header.innerHTML = `
-                <span class="folder-arrow${isExpanded ? '' : ' collapsed'}">▼</span>
-                <span>Global Skills</span>
+                <div class="section-icon icon-global">🌍</div>
+                <span class="section-title">Global Skills</span>
+                <span class="section-arrow ${isExpanded ? '' : 'collapsed'}">▼</span>
             `;
 
             const content = document.createElement('div');
@@ -1246,23 +1261,8 @@
             const header = e.target.closest('.folder-header');
             if (header) {
                 const targetId = header.getAttribute('data-target');
-                const content = document.getElementById(targetId);
-                const arrow = header.querySelector('.folder-arrow');
-
-                if (content && arrow) {
-                    if (content.classList.contains('collapsed')) {
-                        content.classList.remove('collapsed');
-                        arrow.classList.remove('collapsed');
-                        expandedFolders.add(targetId); // Track expansion
-
-                        // Trigger re-render to load data for newly expanded folder
-                        renderProjects();
-                    } else {
-                        content.classList.add('collapsed');
-                        arrow.classList.add('collapsed');
-                        expandedFolders.delete(targetId); // Track collapse
-                    }
-                    saveState(); // Persist changes
+                if (targetId) {
+                    toggleFolderExpansion(targetId);
                 }
             }
         });
