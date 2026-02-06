@@ -193,10 +193,10 @@ export class ConversationService {
             // Exclude & and other special control characters to prevent matching URL parameters or complex strings
             const matches = [...jsonStr.matchAll(/(?:file:\/\/)?(\/(?:Users|Volumes|home|opt|var)\/(?:[^\\/:"*?<>|\r\n&]+\/)*[^\\/:"*?<>|\r\n&]+)/g)];
 
-            // console.log(`[Heuristic] Found ${matches.length} path matches in steps`);
+            console.log(`[Heuristic] Found ${matches.length} path matches in steps`);
             if (matches.length === 0) {
                 // Debug: why are we missing paths?
-                // console.log(`[Heuristic] NO MATCHES. JSON sample: ${jsonStr.slice(0, 300)}...`);
+                console.log(`[Heuristic] NO MATCHES. JSON sample: ${jsonStr.slice(0, 300)}...`);
             }
 
             for (const m of matches) {
@@ -231,7 +231,7 @@ export class ConversationService {
 
                 // Additional check: project root should not contain &
                 if (projectRoot && projectRoot.length > 1 && !projectRoot.includes('&')) {
-                    // console.log(`[PathExtract] Found file: ${pathStr} → Project: ${projectRoot}`);
+                    console.log(`[PathExtract] Found file: ${pathStr} → Project: ${projectRoot}`);
                     return projectRoot;
                 }
             }
