@@ -187,10 +187,6 @@
                     const statusEl = document.getElementById('connection-status');
                     if (statusEl) statusEl.textContent = message.status;
                 }
-                // Default to first group if no selection
-                if (!selectedGroupId && quotaGroups.length > 0) {
-                    selectedGroupId = quotaGroups[0].id;
-                }
                 renderUsage();
                 break;
 
@@ -246,10 +242,10 @@
     // Helper: Get icon and background color for group
     function getGroupStyle(groupId) {
         const styles = {
-            'gemini-pro': { icon: '✦', bg: '#1a1a2e', iconColor: '#fff' },
-            'gemini-flash': { icon: '✦', bg: '#2d2d3a', iconColor: '#ffd700' },
-            'claude': { icon: '✷', bg: '#d97757', iconColor: '#fff' },
-            'gpt': { icon: '⬢', bg: '#10a37f', iconColor: '#fff' },
+            'gemini-pro': { icon: '✦', image: geminiIconUri, bg: 'transparent', iconColor: '#fff' },
+            'gemini-flash': { icon: '✦', image: geminiIconUri, bg: 'transparent', iconColor: '#ffd700' },
+            'claude': { icon: '✷', image: anthropicIconUri, bg: 'transparent', iconColor: '#fff' },
+            'gpt': { icon: '⬢', image: openaiIconUri, bg: 'transparent', iconColor: '#fff' },
             'other': { icon: '◈', bg: '#4b5563', iconColor: '#fff' }
         };
         return styles[groupId] || styles['other'];
@@ -289,8 +285,14 @@
 
                 const cardEl = document.createElement('div');
                 cardEl.className = 'usage-card clickable' + (isSelected ? ' selected' : '');
+
+                let iconContent = style.icon;
+                if (style.image) {
+                    iconContent = `<img src="${style.image}" class="model-icon-img" />`;
+                }
+
                 cardEl.innerHTML = `
-                    <div class="usage-card-icon" style="background-color: ${style.bg}; color: ${style.iconColor}">${style.icon}</div>
+                    <div class="usage-card-icon" style="background-color: ${style.bg}; color: ${style.iconColor}">${iconContent}</div>
                     <div class="usage-card-content">
                         <span class="usage-card-name">${group.name}</span>
                         <span class="usage-card-subtitle">${formatDate(group.resetDate)}</span>
@@ -320,7 +322,7 @@
                 if (isSelected && group.models) {
                     const detailsContainer = document.createElement('div');
                     detailsContainer.className = 'usage-list visible';
-                    detailsContainer.style.padding = '4px 8px 12px 38px'; // Offset to align with card content
+                    detailsContainer.style.padding = '4px 8px 12px 10px'; // Align with the left edge of the card icon (card pad is 10px)
 
                     group.models.forEach(model => {
                         const modelRemaining = Math.min(100, Math.max(0, model.remaining));

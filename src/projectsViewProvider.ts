@@ -676,6 +676,9 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'main.js'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'styles.css'));
         const folderIconUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'folder-icon.png'));
+        const geminiIconUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'Gemini.png'));
+        const anthropicIconUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'Claude.png'));
+        const openaiIconUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'GPT.png'));
         const nonce = getNonce();
 
         return `<!DOCTYPE html>
@@ -688,6 +691,9 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                 <title>Projects</title>
                 <script nonce="${nonce}">
                     const folderIconUri = "${folderIconUri}";
+                    const geminiIconUri = "${geminiIconUri}";
+                    const anthropicIconUri = "${anthropicIconUri}";
+                    const openaiIconUri = "${openaiIconUri}";
                 </script>
             </head>
             <body>
