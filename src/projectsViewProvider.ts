@@ -518,7 +518,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             const debouncedRefresh = this.debounce((reason: string) => {
                 console.log(`[Watcher] Triggering refresh for ${project.name}. Reason: ${reason}`);
                 this.refresh();
-            }, 500);
+            }, 800);
 
             patterns.forEach(p => {
                 const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(normPath), p));
@@ -725,7 +725,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         let updatedCount = 0;
 
         // Process in chunks to avoid flooding the API, but parallelize within chunks
-        const chunkSize = 5;
+        const chunkSize = 3;
         for (let i = 0; i < conversations.length; i += chunkSize) {
             const chunk = conversations.slice(i, i + chunkSize);
 
