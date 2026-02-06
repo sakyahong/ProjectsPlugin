@@ -24,7 +24,9 @@
         sparkles: `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path><path d="M5 3v4"></path><path d="M19 17v4"></path><path d="M3 5h4"></path><path d="M17 19h4"></path></svg>`,
         sparkle: `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></svg>`,
         message: `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`,
-        folder: `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>`
+        folder: `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>`,
+        folderOpen: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path><path d="M2 10h20"></path></svg>`,
+        file: `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`
     };
 
     function saveState() {
@@ -358,9 +360,10 @@
     let ctxMenuTarget = null; // { id, path }
     const ctxMenuEl = document.createElement('div');
     ctxMenuEl.className = 'ctx-menu';
-    ctxMenuEl.innerHTML = `
-
-        <div class="ctx-item" id="ctx-separator" style="height:1px; background:var(--border-color); margin:4px 0; display:none;"></div>
+    ctxMenuEl.innerHTML = `<div class="ctx-item" id="ctx-install-skill" style="display:none;">
+            <svg class="ctx-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Install Skill
+        </div>
         <div class="ctx-item" id="ctx-apply-skill" style="display:none;">
             <svg class="ctx-icon" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"></path><path d="M12 19h8"></path></svg>
             Apply Skill
@@ -369,15 +372,11 @@
             <svg class="ctx-icon" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             Delete Skill
         </div>
-        <div class="ctx-item" id="ctx-install-skill" style="display:none;">
-            <svg class="ctx-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-            Install Skill
-        </div>
+        <div class="ctx-item" id="ctx-separator" style="height:1px; background:var(--vscode-menu-separatorBackground, var(--border-color)); margin:4px 0; display:none;"></div>
         <div class="ctx-item" id="ctx-reveal">
             <svg class="ctx-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
             Reveal in Finder
-        </div>
-    `;
+        </div>`;
     document.body.appendChild(ctxMenuEl);
 
 
@@ -437,9 +436,13 @@
                 ctxMenuTarget = { id, path };
 
                 // Determine type for menu items
-                const isGlobalHeader = targetEl.classList.contains('project-header') && targetEl.getAttribute('data-id') === 'global-skills';
-                const isNormalProject = targetEl.classList.contains('project-header') && !isGlobalHeader;
-                const isSkillRoot = targetEl.getAttribute('data-is-skill') === 'true';
+                const isTopGlobal = targetEl.classList.contains('global-section') ||
+                    (targetEl.classList.contains('folder-header') && targetEl.dataset.target === 'global-skills-content');
+
+                const isTopProjectSkills = targetEl.classList.contains('folder-header') && targetEl.getAttribute('data-type') === 'skills';
+
+                const itemType = targetEl.getAttribute('data-item-type');
+                const isSpecificSkill = targetEl.getAttribute('data-is-skill') === 'true' && itemType === 'skills';
 
                 // Toggle visibility based on type
                 const itemSeparator = document.getElementById('ctx-separator');
@@ -453,23 +456,21 @@
                     if (el) el.style.display = 'none';
                 });
 
-                if (isNormalProject) {
-                    itemReveal.style.display = 'flex';
-                } else if (isGlobalHeader) {
+                if (isTopGlobal || isTopProjectSkills) {
+                    // Top level Skill cards
                     itemInstall.style.display = 'flex';
+                    itemSeparator.style.display = 'block';
                     itemReveal.style.display = 'flex';
-                } else if (targetEl.classList.contains('folder-header') && targetEl.getAttribute('data-type') === 'skills') {
-                    // Project Skills root
-                    itemInstall.style.display = 'flex';
-                    itemReveal.style.display = 'flex';
-                } else if (isSkillRoot) {
-                    // Specific Skill folder
+                } else if (isSpecificSkill) {
+                    // Actual Skill instance
                     itemApply.style.display = 'flex';
                     itemDelete.style.display = 'flex';
+                    itemSeparator.style.display = 'block';
                     itemReveal.style.display = 'flex';
                 } else {
-                    // Files or subfolders
+                    // Chats, Files or sub-items
                     itemReveal.style.display = 'flex';
+                    itemSeparator.style.display = 'none';
                 }
 
                 // Adjust position to stay in bounds
@@ -608,7 +609,7 @@
             if (type === 'skills') {
                 const projectSkills = skills[project.id];
                 if (projectSkills && projectSkills.length > 0) {
-                    const newHtml = renderSkills(projectSkills, project.id, 0);
+                    const newHtml = renderSkills(projectSkills, project.id, 0, 'skills');
                     if (contentDiv.innerHTML !== newHtml) {
                         contentDiv.innerHTML = newHtml;
                         bindFileClickEvents(contentDiv);
@@ -621,7 +622,7 @@
             } else if (type === 'files') {
                 const filesData = projectFiles[project.id];
                 if (filesData && filesData.length > 0) {
-                    const newHtml = renderSkills(filesData, project.id, 0);
+                    const newHtml = renderSkills(filesData, project.id, 0, 'files');
                     if (contentDiv.innerHTML !== newHtml) {
                         contentDiv.innerHTML = newHtml;
                         bindFileClickEvents(contentDiv);
@@ -681,7 +682,7 @@
 
             const hasSkills = globalSkills.length > 0;
             if (hasSkills) {
-                content.innerHTML = renderSkills(globalSkills, 'global', 0);
+                content.innerHTML = renderSkills(globalSkills, 'global', 0, 'skills');
                 content.querySelectorAll('.file-item').forEach(el => {
                     el.onclick = (e) => {
                         e.stopPropagation();
@@ -755,7 +756,7 @@
 
             const hasSkills = globalSkills.length > 0;
             if (hasSkills) {
-                innerContent.innerHTML = renderSkills(globalSkills, 'global', 0);
+                innerContent.innerHTML = renderSkills(globalSkills, 'global', 0, 'skills');
                 // Attach click listeners for files
                 innerContent.querySelectorAll('.file-item').forEach(el => {
                     el.onclick = (e) => {
@@ -1031,7 +1032,7 @@
             const projectSkills = skills[project.id];
             // We re-render skills. renderSkills returns HTML string.
             if (projectSkills && projectSkills.length > 0) {
-                const newSkillsHtml = renderSkills(projectSkills, project.id, 0);
+                const newSkillsHtml = renderSkills(projectSkills, project.id, 0, 'skills');
                 if (skillsContentDiv.innerHTML !== newSkillsHtml) {
                     console.log(`[UI] Updating Skills content for ${project.name}`);
                     skillsContentDiv.innerHTML = newSkillsHtml;
@@ -1084,7 +1085,7 @@
         if (isFilesExpanded) {
             const filesData = projectFiles[project.id];
             if (filesData && filesData.length > 0) {
-                const newFilesHtml = renderSkills(filesData, project.id, 0); // Reuse tree renderer
+                const newFilesHtml = renderSkills(filesData, project.id, 0, 'files'); // Reuse tree renderer
                 if (filesContentDiv.innerHTML !== newFilesHtml) {
                     filesContentDiv.innerHTML = newFilesHtml;
                     // Re-bind click events for files
@@ -1229,7 +1230,7 @@
     }
 
     // Recursive function to render skills tree
-    function renderSkills(nodes, projectId, depth) {
+    function renderSkills(nodes, projectId, depth, type = 'skills') {
         let html = '';
         if (!nodes || nodes.length === 0) return html;
 
@@ -1237,25 +1238,27 @@
             if (node.type === 'directory') {
                 const uniqueId = getStableId(`skill-${projectId}`, node.path);
                 const isExpanded = expandedFolders.has(uniqueId);
-                // Top level folders (depth 0) marked as Skill Roots
-                const isSkillAttr = depth === 0 ? 'data-is-skill="true"' : '';
+                // Top level folders (depth 0) marked as Skill Roots (only if type is skills)
+                const isSkillAttr = (depth === 0 && type === 'skills') ? 'data-is-skill="true"' : '';
 
                 html += `
                     <div class="skill-item">
-                        <div class="folder-header" data-target="${uniqueId}" data-path="${node.path}" ${isSkillAttr}>
+                        <div class="folder-header skill-folder" data-target="${uniqueId}" data-path="${node.path}" ${isSkillAttr} data-item-type="${type}">
                             <span class="folder-arrow ${isExpanded ? '' : 'collapsed'}">▼</span>
-                            <span>${node.name}</span>
+                            <span class="tree-icon">${LUCIDE_ICONS.folderOpen}</span>
+                            <span class="tree-label">${node.name}</span>
                         </div>
-                        <div id="${uniqueId}" class="folder-content ${isExpanded ? '' : 'collapsed'}" style="margin-left: 12px; border-left: 1px solid var(--border-color);">
-                            ${renderSkills(node.children, projectId, depth + 1)}
+                        <div id="${uniqueId}" class="folder-content tree-content ${isExpanded ? '' : 'collapsed'}">
+                            ${renderSkills(node.children, projectId, depth + 1, type)}
                         </div>
                     </div>
                 `;
             } else {
                 // File item
                 html += `
-                    <div class="file-item" data-path="${node.path}" style="padding: 2px 0 2px 18px; font-size: 11px; color: var(--muted-text);">
-                        ${node.name}
+                    <div class="file-item tree-file" data-path="${node.path}" data-item-type="${type}">
+                        <span class="tree-icon">${LUCIDE_ICONS.file}</span>
+                        <span class="tree-label">${node.name}</span>
                     </div>
                 `;
             }
