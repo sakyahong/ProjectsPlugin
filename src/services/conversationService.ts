@@ -160,155 +160,170 @@ export class ConversationService {
 
 
     // Extract workspace path from conversation steps
-    extractWorkspaceFromSteps(stepsResponse: any): string | null {
-        if (!stepsResponse || !stepsResponse.steps || !Array.isArray(stepsResponse.steps)) {
-            // console.log('Invalid steps response structure');
+    extractWorkspaceFromSteps(stepsResponse: any, conversationTitle?: string): string | null {
+        if (!stepsResponse) {
+            console.log(`[PathExtract] No stepsResponse for: ${conversationTitle || 'unknown'}`);
             return null;
         }
 
+        // Handle different response structures
+        const steps = stepsResponse.steps || stepsResponse.result?.steps || [];
+        if (!Array.isArray(steps) || steps.length === 0) {
+            console.log(`[PathExtract] No steps array for: ${conversationTitle || 'unknown'}`);
+            return null;
+        }
+
+        console.log(`[PathExtract] Processing ${steps.length} steps for: ${conversationTitle || 'unknown'}`);
+
         // Strategy 1: Check known fields (efficient)
-        for (const step of stepsResponse.steps) {
-            // Check activeUserState known paths
+        for (const step of steps) {
+            // Check userInput.activeUserState
             const state = step.userInput?.activeUserState;
             if (state) {
-                if (state.activeDocument?.uri) return this.extractRootPath(state.activeDocument.uri);
-                if (state.visibleFiles?.[0]?.uri) return this.extractRootPath(state.visibleFiles[0].uri);
-                if (state.workspacePath) return this.extractRootPath(state.workspacePath); // hypothetical
+                if (state.activeDocument?.uri) {
+                    const path = this.extractRootPath(state.activeDocument.uri);
+                    if (path) {
+                        console.log(`[PathExtract] Found via activeDocument: ${path}`);
+                        return path;
+                    }
+                }
+                if (state.visibleFiles?.[0]?.uri) {
+                    const path = this.extractRootPath(state.visibleFiles[0].uri);
+                    if (path) {
+                        console.log(`[PathExtract] Found via visibleFiles: ${path}`);
+                        return path;
+                    }
+                }
+                if (state.workspacePath) {
+                    const path = this.extractRootPath(state.workspacePath);
+                    if (path) {
+                        console.log(`[PathExtract] Found via workspacePath field: ${path}`);
+                        return path;
+                    }
+                }
             }
-            // Check metadata
+
+            // Check metadata.workspaceContext
             if (step.metadata?.workspaceContext?.rootUri) {
+                console.log(`[PathExtract] Found via workspaceContext: ${step.metadata.workspaceContext.rootUri}`);
                 return step.metadata.workspaceContext.rootUri;
+            }
+
+            // Check toolResults for file paths
+            if (step.toolResults) {
+                for (const result of step.toolResults) {
+                    if (result.path || result.filePath || result.uri) {
+                        const uri = result.path || result.filePath || result.uri;
+                        const path = this.extractRootPath(uri);
+                        if (path && this.isValidProjectPath(path)) {
+                            console.log(`[PathExtract] Found via toolResults: ${path}`);
+                            return path;
+                        }
+                    }
+                }
             }
         }
 
         // Strategy 2: Brute force regex search (fallback)
-        // Convert the whole steps object to string and look for file paths
         try {
-            // Check first few steps fully
-            const checkLimit = Math.min(stepsResponse.steps.length, 5);
-            const jsonStr = JSON.stringify(stepsResponse.steps.slice(0, checkLimit));
+            const checkLimit = Math.min(steps.length, 20); // Increased limit
+            const jsonStr = JSON.stringify(steps.slice(0, checkLimit));
 
-            // Regex to capture absolute paths: /Users/..., /Volumes/..., etc.
-            // Use a broader character set for path segments to handle special chars, spaces, usage of % for encoded paths, etc.
-            // Exclude & and other special control characters to prevent matching URL parameters or complex strings
-            const matches = [...jsonStr.matchAll(/(?:file:\/\/)?(\/(?:Users|Volumes|home|opt|var)\/(?:[^\\/:"*?<>|\r\n&]+\/)*[^\\/:"*?<>|\r\n&]+)/g)];
+            // Enhanced regex: matches more path patterns
+            // Supports: /Users, /Volumes, /home, /opt, /var, /mnt, /tmp, /private
+            const pathRegex = /(?:file:\/\/)?(\/(?:Users|Volumes|home|opt|var|mnt|tmp|private\/(?:var|tmp))\/[^\s"'<>|\r\n]+?\/[^\s"'<>|\r\n]+)/gi;
+            const matches = [...jsonStr.matchAll(pathRegex)];
 
-            console.log(`[Heuristic] Found ${matches.length} path matches in steps`);
-            if (matches.length === 0) {
-                // Debug: why are we missing paths?
-                console.log(`[Heuristic] NO MATCHES. JSON sample: ${jsonStr.slice(0, 300)}...`);
-            }
+            console.log(`[PathExtract] Regex found ${matches.length} potential paths`);
 
             for (const m of matches) {
                 let pathStr = m[1] || m[0];
 
-                // Decode URI components if it looks encoded (e.g. %20)
+                // Enhanced cleanup: Remove trailing backticks, punctuation, and invalid sequences
+                pathStr = pathStr.replace(/[`"',;:\]\}\)\n\r\\]+.*$/g, ''); // Stop at first invalid char
+                pathStr = pathStr.replace(/\.\/n.*$/g, ''); // Remove ./n sequences
+                pathStr = pathStr.replace(/[`"',;:\]\}]+$/, ''); // Ensure no trailing special chars
+                pathStr = pathStr.split(/[\s"'<>`]/)[0]; // Stop at whitespace or special chars
+                pathStr = pathStr.replace(/\/+$/, ''); // Remove trailing slashes
+
                 try {
                     if (pathStr.includes('%')) {
                         pathStr = decodeURIComponent(pathStr);
                     }
-                } catch (e) {
-                    // ignore decoding errors
-                }
+                } catch (e) { }
 
-                // Filter out system and build paths that confuse association
-                if (pathStr.includes('.gemini') ||
-                    pathStr.includes('Library/Application Support') ||
-                    pathStr.includes('Library/Developer') || // Xcode DerivedData
-                    pathStr.includes('DerivedData') ||
-                    pathStr.includes('/var/folders') ||
-                    pathStr.includes('.vscode/extensions') ||
-                    pathStr.includes('/node_modules/') ||
-                    pathStr.includes('/.git/')) {
+                // Skip system/temporary paths
+                if (!this.isValidProjectPath(pathStr)) {
                     continue;
                 }
 
-                // Found a likely project source path
-                // Use extractRootPath to get project root instead of file path
-                // Ensure we add file:// schema for extractRootPath validation if needed,
-                // but extractRootPath handles raw strings mostly.
                 const projectRoot = this.extractRootPath('file://' + pathStr);
-
-                // Additional check: project root should not contain &
-                if (projectRoot && projectRoot.length > 1 && !projectRoot.includes('&')) {
-                    console.log(`[PathExtract] Found file: ${pathStr} → Project: ${projectRoot}`);
+                if (projectRoot && projectRoot.length > 5 && !projectRoot.includes('&')) {
+                    console.log(`[PathExtract] Found via regex: ${projectRoot}`);
                     return projectRoot;
                 }
             }
         } catch (e) {
-            // ignore
+            console.log(`[PathExtract] Regex error:`, e);
         }
 
+        console.log(`[PathExtract] No path found for: ${conversationTitle || 'unknown'}`);
         return null;
+    }
+
+    // Check if a path is a valid project path (not system/temp)
+    private isValidProjectPath(pathStr: string): boolean {
+        const invalidPatterns = [
+            '.gemini/antigravity',
+            'Library/Application Support',
+            'Library/Developer',
+            'DerivedData',
+            '/var/folders',
+            '.vscode/extensions',
+            '/node_modules/',
+            '/.git/',
+            '/Caches/',
+            '/tmp/',
+            '/private/var',
+            '/private/tmp',
+            'Application Support'
+        ];
+
+        for (const pattern of invalidPatterns) {
+            if (pathStr.includes(pattern)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private extractRootPath(fileUri: string): string {
         if (!fileUri) return '';
 
-        // Convert file URI to path
         let filePath = fileUri.replace(/^file:\/\//, '');
-        filePath = decodeURIComponent(filePath);
+        try {
+            filePath = decodeURIComponent(filePath);
+        } catch (e) { }
 
-        // 智能推断项目根目录
-        const parts = filePath.split('/').filter(p => p);
+        // Standardize separators and remove trailing slash
+        filePath = filePath.replace(/\\/g, '/').replace(/\/+$/, '');
 
-        // 检测是否是纯目录路径(不是文件)
-        const lastPart = parts[parts.length - 1];
-        const isFile = lastPart && lastPart.includes('.');
-
-        // 如果是文件路径,需要移除文件名
-        // 如果是目录路径,直接使用
-        const dirParts = isFile ? parts.slice(0, -1) : parts;
-
-        // 根据路径模式推断项目根目录
-        // 关键:用户主目录下通常是 /Users/username/SomeFolder/ProjectName
-        // 外部磁盘通常是 /Volumes/DiskName/SomeFolder/SomeFolder/ProjectName
-
-        if (dirParts[0] === 'Users' && dirParts.length >= 4) {
-            // macOS 用户目录: /Users/username/folder/project/...
-            // 项目根目录在第4层 (Downloads/Ares, Documents/MyProject, etc.)
-            return '/' + dirParts.slice(0, 4).join('/');
+        // NEW ROBUST LOGIC: Just get the directory of the file.
+        // Containment logic in filterByWorkspace handles the rest.
+        const basename = filePath.split('/').pop() || '';
+        if (basename.includes('.') && !basename.startsWith('.')) {
+            const lastSlash = filePath.lastIndexOf('/');
+            if (lastSlash > 0) {
+                return filePath.substring(0, lastSlash);
+            }
         }
 
-        if (dirParts[0] === 'Users' && dirParts.length === 3) {
-            // macOS 用户目录但只有3层: /Users/username/project
-            return '/' + dirParts.slice(0, 3).join('/');
-        }
-
-        if (dirParts[0] === 'Volumes' && dirParts.length >= 5) {
-            // macOS 外部磁盘: /Volumes/DiskName/Folder/Folder/ProjectName/...
-            // 项目根目录在第5层
-            return '/' + dirParts.slice(0, 5).join('/');
-        }
-
-        if (dirParts[0] === 'Volumes' && dirParts.length === 4) {
-            // macOS 外部磁盘但只有4层
-            return '/' + dirParts.slice(0, 4).join('/');
-        }
-
-        if (dirParts[0] === 'home' && dirParts.length >= 4) {
-            // Linux 用户目录: /home/username/folder/project/...
-            return '/' + dirParts.slice(0, 4).join('/');
-        }
-
-        if (dirParts[0] === 'home' && dirParts.length === 3) {
-            // Linux 用户目录但只有3层
-            return '/' + dirParts.slice(0, 3).join('/');
-        }
-
-        // Fallback: 返回目录路径本身(如果足够短)或截取前几层
-        if (dirParts.length <= 4) {
-            return '/' + dirParts.join('/');
-        }
-
-        // 最终 fallback: 返回前4层
-        return '/' + dirParts.slice(0, 4).join('/');
+        return filePath;
     }
 
     // Process API response into Conversation array
     private processConversationsResponse(response: any): Conversation[] {
         if (!response || !response.result || !response.result.trajectorySummaries) {
-            // Try alternate response paths
             if (response?.trajectorySummaries) {
                 return this.parseSummaries(response.trajectorySummaries);
             }
@@ -327,7 +342,6 @@ export class ConversationService {
                 new Date(s.lastModifiedTime).getTime() : Date.now();
 
             let rawTitle = s.summary || s.title || s.firstUserMessage || 'Untitled Conversation';
-            // Truncate title to ensure privacy and UI neatness
             if (rawTitle.length > 60) {
                 rawTitle = rawTitle.substring(0, 60) + '...';
             }
@@ -337,18 +351,15 @@ export class ConversationService {
                 trajectoryId: s.trajectoryId || '',
                 title: rawTitle,
                 lastModifiedAt,
-                // Try multiple possible field names for workspace
                 workspacePath: s.workspaceUri || s.workspacePath || s.workspace || s.folderUri || undefined,
                 timeAgo: this.formatTimeAgo(lastModifiedAt)
             });
         }
 
-        // Sort by last modified time (newest first)
         conversations.sort((a, b) => b.lastModifiedAt - a.lastModifiedAt);
         return conversations;
     }
 
-    // Format timestamp to relative time
     private formatTimeAgo(timestamp: number): string {
         const now = Date.now();
         const diff = now - timestamp;
@@ -363,12 +374,11 @@ export class ConversationService {
         return new Date(timestamp).toLocaleDateString();
     }
 
-    // Filter conversations by workspace path
     filterByWorkspace(conversations: Conversation[], workspacePath: string): Conversation[] {
         return conversations.filter(c => {
             if (!c.workspacePath) return false;
-            // Normalize paths for comparison
-            const normalizePath = (p: string) => {
+
+            const normalize = (p: string) => {
                 if (!p) return '';
                 try {
                     return decodeURIComponent(p.replace(/^file:\/\//, ''))
@@ -380,25 +390,17 @@ export class ConversationService {
                 }
             };
 
-            const normalizedConvoPath = normalizePath(c.workspacePath);
-            const normalizedWorkspacePath = normalizePath(workspacePath);
+            const normalizedConvoPath = normalize(c.workspacePath);
+            const normalizedWorkspacePath = normalize(workspacePath);
 
-            // STRICT MATCHING
             // 1. Exact match
             if (normalizedConvoPath === normalizedWorkspacePath) return true;
 
-            // 2. Child directory match (Convo is inside Workspace)
-            // MUST end with / or be exact match to avoid partial name matching (e.g. Project1 vs Project10)
-            if (normalizedWorkspacePath.startsWith(normalizedConvoPath + '/') ||
-                normalizedWorkspacePath.startsWith(normalizedConvoPath + '\\')) {
-                return true;
-            }
+            // 2. Convo is inside Workspace (File match)
+            if (normalizedConvoPath.startsWith(normalizedWorkspacePath + '/')) return true;
 
-            // 3. Parent directory match (Workspace is inside Convo - less likely but possible if we open subfolder)
-            if (normalizedConvoPath.startsWith(normalizedWorkspacePath + '/') ||
-                normalizedConvoPath.startsWith(normalizedWorkspacePath + '\\')) {
-                return true;
-            }
+            // 3. Workspace is inside Convo (Parent folder match)
+            if (normalizedWorkspacePath.startsWith(normalizedConvoPath + '/')) return true;
 
             return false;
         });

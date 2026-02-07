@@ -160,38 +160,8 @@
 
             case 'conversationsUpdate':
                 if (message.conversations) {
+                    console.log('[UI] Conversations update received:', message.conversations.length);
                     // Safety merge: Do not lose workspace paths we already know
-                    message.conversations.forEach(newC => {
-                        const oldC = allConversations.find(oc => oc.id === newC.id);
-                        if (oldC && oldC.workspacePath && !newC.workspacePath) {
-                            newC.workspacePath = oldC.workspacePath;
-                        }
-                    });
-
-                    const nextConvs = JSON.stringify(message.conversations.map(c => c.id + (c.workspacePath || '')));
-                    const prevConvs = JSON.stringify(allConversations.map(c => c.id + (c.workspacePath || '')));
-
-                    if (nextConvs !== prevConvs || allConversations.length === 0) {
-                        allConversations = message.conversations;
-                        console.log('[UI] Conversations data updated:', allConversations.length);
-                        debouncedRenderProjects();
-                    }
-                }
-                break;
-            case 'usageUpdate':
-                quotaGroups = message.groups || [];
-                // Update status if provided
-                if (message.status) {
-                    console.log('[UI] Connection status:', message.status);
-                    const statusEl = document.getElementById('connection-status');
-                    if (statusEl) statusEl.textContent = message.status;
-                }
-                renderUsage();
-                break;
-
-            case 'conversationsUpdate':
-                console.log('[UI] Conversations update received:', message.conversations?.length);
-                if (message.conversations && message.conversations.length > 0) {
                     let hasNewPath = false;
                     message.conversations.forEach(newC => {
                         const oldC = allConversations.find(oc => oc.id === newC.id);
@@ -205,12 +175,24 @@
                         }
                     });
 
-                    if (hasNewPath || allConversations.length !== message.conversations.length) {
+                    const nextConvs = JSON.stringify(message.conversations.map(c => c.id + (c.workspacePath || '')));
+                    const prevConvs = JSON.stringify(allConversations.map(c => c.id + (c.workspacePath || '')));
+
+                    if (nextConvs !== prevConvs || hasNewPath || allConversations.length === 0) {
                         allConversations = message.conversations;
-                        console.log('[UI] Conversations enriched with new paths, scheduling render');
+                        console.log('[UI] Conversations data updated/enriched');
                         debouncedRenderProjects();
                     }
                 }
+                break;
+            case 'usageUpdate':
+                quotaGroups = message.groups || [];
+                if (message.status) {
+                    console.log('[UI] Connection status:', message.status);
+                    const statusEl = document.getElementById('connection-status');
+                    if (statusEl) statusEl.textContent = message.status;
+                }
+                renderUsage();
                 break;
         }
     });

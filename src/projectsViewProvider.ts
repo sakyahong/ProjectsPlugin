@@ -25,6 +25,8 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
     private conversationTimer?: NodeJS.Timeout;
     private autoSyncTimer?: NodeJS.Timeout;
+    private skillPollingTimer?: NodeJS.Timeout;
+    private skillSnapshotCache: Map<string, string> = new Map(); // path -> hash of skills
     private conversationPathCache: Map<string, string> = new Map();
 
     constructor(
@@ -50,12 +52,18 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
             this.runBackgroundDetection();
         }, 15000);
 
+        // Skills Polling for external drives (every 5s) - fallback for watchers that don't work
+        this.skillPollingTimer = setInterval(() => {
+            this.pollSkillChanges();
+        }, 5000);
+
 
 
         context.subscriptions.push({
             dispose: () => {
                 if (this.conversationTimer) clearInterval(this.conversationTimer);
                 if (this.autoSyncTimer) clearInterval(this.autoSyncTimer);
+                if (this.skillPollingTimer) clearInterval(this.skillPollingTimer);
                 this.fileWatchers.forEach(w => w.dispose());
             }
         });
@@ -365,6 +373,87 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    /**
+     * Poll for skill changes as a fallback when FileSystemWatcher doesn't work
+     * (external drives, non-workspace projects, etc.)
+     */
+    private pollSkillChanges() {
+        try {
+            const folders = vscode.workspace.workspaceFolders || [];
+            const globalSkillsPath = path.join(os.homedir(), '.gemini/antigravity/global_skills');
+
+            // Calculate a simple hash of all skill files
+            const calculateSkillsHash = (skillsPath: string): string => {
+                if (!fs.existsSync(skillsPath)) return '';
+
+                try {
+                    const items: string[] = [];
+                    const files = fs.readdirSync(skillsPath);
+
+                    for (const file of files) {
+                        const fullPath = path.join(skillsPath, file);
+                        try {
+                            const stat = fs.statSync(fullPath);
+                            // Use name + mtime as simple hash
+                            items.push(`${file}:${stat.mtimeMs}`);
+
+                            // Check for SKILL.md changes inside skill folders
+                            if (stat.isDirectory()) {
+                                const skillMdPath = path.join(fullPath, 'SKILL.md');
+                                if (fs.existsSync(skillMdPath)) {
+                                    const skillMdStat = fs.statSync(skillMdPath);
+                                    items.push(`${file}/SKILL.md:${skillMdStat.mtimeMs}`);
+                                }
+                            }
+                        } catch (e) {
+                            // Ignore stat errors for individual files
+                        }
+                    }
+
+                    return items.sort().join('|');
+                } catch (e) {
+                    return '';
+                }
+            };
+
+            let needsRefresh = false;
+
+            // Check global skills
+            const globalHash = calculateSkillsHash(globalSkillsPath);
+            const cachedGlobalHash = this.skillSnapshotCache.get('__global__') || '';
+            if (globalHash !== cachedGlobalHash) {
+                if (cachedGlobalHash !== '') { // Only log changes, not initial load
+                    console.log('[SkillPoll] Global skills changed, triggering refresh');
+                }
+                this.skillSnapshotCache.set('__global__', globalHash);
+                if (cachedGlobalHash !== '') needsRefresh = true;
+            }
+
+            // Check each project's skills
+            for (const folder of folders) {
+                const folderPath = this.normalizePath(folder.uri.fsPath);
+                const skillsPath = path.join(folderPath, '.agent', 'skills');
+                const hash = calculateSkillsHash(skillsPath);
+                const cachedHash = this.skillSnapshotCache.get(folderPath) || '';
+
+                if (hash !== cachedHash) {
+                    if (cachedHash !== '') { // Only log changes, not initial load
+                        console.log(`[SkillPoll] Skills changed in ${folder.name}, triggering refresh`);
+                    }
+                    this.skillSnapshotCache.set(folderPath, hash);
+                    if (cachedHash !== '') needsRefresh = true;
+                }
+            }
+
+            if (needsRefresh) {
+                this.refresh();
+            }
+        } catch (error) {
+            console.error('[SkillPoll] Error polling skills:', error);
+        }
+    }
+
+
     private async initQuotaFetching() {
         // Trigger once immediately
         this.triggerAsyncLoad();
@@ -481,43 +570,73 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
 
         // Global Skills Watcher
         if (fs.existsSync(globalSkillsPath)) {
-            console.log(`[Watcher] Creating watcher for Global Skills: ${globalSkillsPath}`);
-            const debouncedGlobalRefresh = this.debounce(() => this.refresh(), 500);
-            const globalWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(globalSkillsPath, '**/*'));
-            globalWatcher.onDidCreate(() => debouncedGlobalRefresh());
-            globalWatcher.onDidChange(() => debouncedGlobalRefresh());
-            globalWatcher.onDidDelete(() => debouncedGlobalRefresh());
-            this.fileWatchers.push(globalWatcher);
+            try {
+                const realGlobalPath = fs.realpathSync(globalSkillsPath);
+                console.log(`[Watcher] Creating watcher for Global Skills (Real): ${realGlobalPath}`);
+                const debouncedGlobalRefresh = this.debounce(() => this.refresh(), 500);
+
+                // Watch the directory itself and its contents recursively
+                const globalWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(realGlobalPath, '**/*'));
+                globalWatcher.onDidCreate(() => debouncedGlobalRefresh());
+                globalWatcher.onDidChange(() => debouncedGlobalRefresh());
+                globalWatcher.onDidDelete(() => debouncedGlobalRefresh());
+                this.fileWatchers.push(globalWatcher);
+            } catch (err) {
+                console.error(`[Watcher] Failed to create global watcher: ${err}`);
+            }
         }
 
         projects.forEach(project => {
-            const normPath = this.normalizePath(project.path);
-            console.log(`[Watcher] Creating multiple watchers for ${normPath}`);
+            try {
+                const normPath = this.normalizePath(project.path);
+                const projectUri = vscode.Uri.file(normPath);
 
-            // Unified pattern: watch all changes inside .agent folder (covers skills, Skills, workflows, etc.)
-            const patterns = ['.agent/**/*'];
+                // Get the corresponding workspace folder if possible
+                const workspaceFolder = vscode.workspace.getWorkspaceFolder(projectUri);
+                const patternBase = workspaceFolder || projectUri;
 
-            const debouncedRefresh = this.debounce((reason: string) => {
-                console.log(`[Watcher] Triggering refresh for ${project.name}. Reason: ${reason}`);
-                this.refresh();
-            }, 800);
+                const debouncedRefresh = this.debounce((reason: string) => {
+                    console.log(`[Watcher] Triggering refresh for ${project.name}. Reason: ${reason}`);
+                    this.refresh();
+                }, 800);
 
-            patterns.forEach(p => {
-                const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(normPath), p));
+                console.log(`[Watcher] Creating watchers for project: ${project.name} at ${normPath}`);
+
+                // Watch .agent folder and everything inside it recursively
+                // Using WorkspaceFolder/Uri directly is more robust than raw string path on macOS
+                const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(patternBase, '.agent/**/*'));
+
                 watcher.onDidCreate((uri) => {
-                    console.log(`[Watcher][${p}] File created: ${uri.fsPath}`);
-                    debouncedRefresh(`Create ${uri.fsPath}`);
+                    console.log(`[Watcher][Project] Created: ${uri.fsPath}`);
+                    debouncedRefresh(`Create: ${uri.fsPath}`);
                 });
                 watcher.onDidChange((uri) => {
-                    console.log(`[Watcher][${p}] File changed: ${uri.fsPath}`);
-                    debouncedRefresh(`Change ${uri.fsPath}`);
+                    console.log(`[Watcher][Project] Changed: ${uri.fsPath}`);
+                    debouncedRefresh(`Change: ${uri.fsPath}`);
                 });
                 watcher.onDidDelete((uri) => {
-                    console.log(`[Watcher][${p}] File deleted: ${uri.fsPath}`);
-                    debouncedRefresh(`Delete ${uri.fsPath}`);
+                    console.log(`[Watcher][Project] Deleted: ${uri.fsPath}`);
+                    debouncedRefresh(`Delete: ${uri.fsPath}`);
                 });
+
                 this.fileWatchers.push(watcher);
-            });
+
+                // Add an EXTRA watcher directly on .agent/skills if it exists, to be double-sure
+                // Some OS/VSCode versions are finicky about hidden folder recursion
+                const agentSkillsPath = path.join(normPath, '.agent', 'skills');
+                if (fs.existsSync(agentSkillsPath)) {
+                    const skillsUri = vscode.Uri.file(agentSkillsPath);
+                    const skillsWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(skillsUri, '**/*'));
+                    skillsWatcher.onDidCreate((uri) => debouncedRefresh(`Secondary Create: ${uri.fsPath}`));
+                    skillsWatcher.onDidChange((uri) => debouncedRefresh(`Secondary Change: ${uri.fsPath}`));
+                    skillsWatcher.onDidDelete((uri) => debouncedRefresh(`Secondary Delete: ${uri.fsPath}`));
+                    this.fileWatchers.push(skillsWatcher);
+                    console.log(`[Watcher] Added secondary skills watcher for ${agentSkillsPath}`);
+                }
+
+            } catch (err) {
+                console.error(`[Watcher] Failed to create watcher for ${project.path}: ${err}`);
+            }
         });
     }
 
@@ -723,7 +842,7 @@ export class ProjectsViewProvider implements vscode.WebviewViewProvider {
                         convo.cascadeId
                     );
 
-                    const workspacePath = this.conversationService.extractWorkspaceFromSteps(steps);
+                    const workspacePath = this.conversationService.extractWorkspaceFromSteps(steps, convo.title);
                     if (workspacePath) {
                         convo.workspacePath = workspacePath;
                         this.conversationPathCache.set(convo.cascadeId, workspacePath);
