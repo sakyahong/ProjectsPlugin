@@ -630,41 +630,73 @@
                 projectListEl.prepend(globalEl);
             }
 
-            globalEl.innerHTML = '';
+            // 1. Get or create header
+            let header = globalEl.querySelector('.folder-header');
+            if (!header) {
+                header = document.createElement('div');
+                header.className = 'folder-header';
+                header.dataset.target = 'global-skills-content';
+                header.style.cursor = 'pointer';
+                globalEl.appendChild(header);
+            }
 
-            const header = document.createElement('div');
-            header.className = 'folder-header';
-            header.dataset.target = 'global-skills-content';
             if (globalSkillsPath) header.dataset.path = globalSkillsPath;
-            header.style.cursor = 'pointer';
 
             const isExpanded = expandedFolders.has('global-skills-content');
 
-            header.innerHTML = `
+            // 2. Update header content ONLY if changed (to prevent flickering)
+            const newHeaderHtml = `
                 <div class="section-icon icon-global">${LUCIDE_ICONS.sparkles}</div>
                 <span class="section-title">Global Skills</span>
                 <span class="section-arrow ${isExpanded ? '' : 'collapsed'}">▼</span>
             `;
-
-            const content = document.createElement('div');
-            content.id = 'global-skills-content';
-            content.className = `folder-content ${isExpanded ? '' : 'collapsed'}`;
-
-            const hasSkills = globalSkills.length > 0;
-            if (hasSkills) {
-                content.innerHTML = renderSkills(globalSkills, 'global', 0, 'skills');
-                content.querySelectorAll('.file-item').forEach(el => {
-                    el.onclick = (e) => {
-                        e.stopPropagation();
-                        vscode.postMessage({ type: 'openFile', path: el.dataset.path });
-                    };
-                });
-            } else {
-                content.innerHTML = '<div class="folder-empty">No global skills found</div>';
+            if (header.innerHTML !== newHeaderHtml) {
+                header.innerHTML = newHeaderHtml;
             }
 
-            globalEl.appendChild(header);
-            globalEl.appendChild(content);
+            // 3. Get or create content
+            let content = globalEl.querySelector('#global-skills-content');
+            if (!content) {
+                content = document.createElement('div');
+                content.id = 'global-skills-content';
+                globalEl.appendChild(content);
+            }
+
+            const newContentClass = `folder-content ${isExpanded ? '' : 'collapsed'}`;
+            if (content.className !== newContentClass) {
+                content.className = newContentClass;
+            }
+
+            // 4. Update inner list
+            if (isExpanded) {
+                const hasSkills = globalSkills.length > 0;
+                if (hasSkills) {
+                    const newSkillsHtml = renderSkills(globalSkills, 'global', 0, 'skills');
+                    if (content.innerHTML !== newSkillsHtml) {
+                        content.innerHTML = newSkillsHtml;
+                        content.querySelectorAll('.file-item').forEach(el => {
+                            el.onclick = (e) => {
+                                e.stopPropagation();
+                                vscode.postMessage({ type: 'openFile', path: el.dataset.path });
+                            };
+                        });
+                    }
+                } else {
+                    content.innerHTML = '<div class="folder-empty">No global skills found</div>';
+                }
+            }
+
+            // Click listener for expansion - shared across both layouts
+            header.onclick = (e) => {
+                e.stopPropagation();
+                if (isExpanded) {
+                    expandedFolders.delete('global-skills-content');
+                } else {
+                    expandedFolders.add('global-skills-content');
+                }
+                saveState();
+                debouncedRenderProjects();
+            };
         } else if (globalEl) {
             globalEl.remove();
         }
@@ -672,81 +704,12 @@
 
     // Nested layout for multiple projects
     function renderNestedLayout() {
-        // Clear any flat layout elements
-        projectListEl.innerHTML = ''; // Clear everything for a fresh render of nested layout
+        // Remove flat context-only elements if switch happens, but keep common nodes
+        const flatSections = projectListEl.querySelectorAll('.flat-section:not(.global-section)');
+        flatSections.forEach(s => s.remove());
 
         // 1. Render Global Skills Section
-        let globalEl = projectListEl.querySelector('.global-section');
-        if (globalSkills) {
-            if (!globalEl) {
-                globalEl = document.createElement('div');
-                globalEl.className = 'project-item global-section';
-                globalEl.style.marginBottom = '8px'; // Reduced from 24px
-                projectListEl.prepend(globalEl);
-            }
-
-            // Re-render header and content cleanly
-            globalEl.innerHTML = '';
-
-            const header = document.createElement('div');
-            header.className = 'project-header';
-            header.dataset.id = 'global-skills';
-            if (globalSkillsPath) header.dataset.path = globalSkillsPath; // Add path for context menu
-            header.style.cursor = 'pointer';
-            header.style.paddingBottom = '4px';
-
-            // Re-calculate expansion state
-            const isExpanded = expandedProjects.has('global-skills');
-
-            // Removed arrow as requested
-            // Add invisible arrow for alignment - Strict Structure Matching
-            // Project headers use empty span for arrow (no text content), so we do the same.
-            header.innerHTML = `
-                <span class="folder-arrow"></span>
-                <span class="dot red-global"></span>
-                <span class="project-name">Global Skills</span>
-            `;
-
-            // Attach safe listener
-            header.onclick = (e) => {
-                e.stopPropagation();
-                console.log('[UI] Toggling Global Skills');
-                toggleProjectExpansion('global-skills');
-            };
-
-            const content = document.createElement('div');
-            content.className = `project-content ${isExpanded ? '' : 'collapsed'}`;
-
-            const innerContent = document.createElement('div');
-            innerContent.className = 'skills-content';
-            // mimic .folder-container styles exactly for alignment
-            innerContent.style.marginLeft = '4px';
-            innerContent.style.paddingLeft = '8px';
-            innerContent.style.borderLeft = '1px solid var(--border-color)';
-
-            const hasSkills = globalSkills.length > 0;
-            if (hasSkills) {
-                innerContent.innerHTML = renderSkills(globalSkills, 'global', 0, 'skills');
-                // Attach click listeners for files
-                innerContent.querySelectorAll('.file-item').forEach(el => {
-                    el.onclick = (e) => {
-                        e.stopPropagation();
-                        console.log('[UI] Opening Global Skill file:', el.dataset.path);
-                        // Use dataset.path as set in renderSkills
-                        vscode.postMessage({ type: 'openFile', path: el.dataset.path });
-                    };
-                });
-            } else {
-                innerContent.innerHTML = '<div class="folder-empty">No global skills found</div>';
-            }
-
-            content.appendChild(innerContent);
-            globalEl.appendChild(header);
-            globalEl.appendChild(content);
-
-        } else if (globalEl) {
-            globalEl.remove();
-        }
+        renderGlobalSkillsSection();
 
         const projectStartIndex = globalSkills ? 1 : 0;
 
